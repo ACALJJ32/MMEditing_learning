@@ -1,4 +1,3 @@
-# Copyright (c) OpenMMLab. All rights reserved.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,7 +9,6 @@ from mmedit.models.common import (PixelShufflePack, ResidualBlockNoBN,
 from mmedit.models.registry import BACKBONES
 from mmedit.utils import get_root_logger
 from .edvr_net import PCDAlignment, TSAFusion
-
 
 @BACKBONES.register_module()
 class BasicVSRNet(nn.Module):
@@ -30,20 +28,38 @@ class BasicVSRNet(nn.Module):
             Default: None.
     """
 
-    def __init__(self, mid_channels=64, num_blocks=30, spynet_pretrained=None):
+    def __init__(self,
+                 mid_channels=64,
+                 num_blocks=30,
+                 keyframe_stride=5,
+                 padding=2,
+                 spynet_pretrained=None,
+                 edvr_pretrained=None):
 
         super().__init__()
 
         self.mid_channels = mid_channels
+        self.padding = padding
+        self.keyframe_stride = keyframe_stride
 
         # optical flow network for feature alignment
         self.spynet = SPyNet(pretrained=spynet_pretrained)
+
+        # information-refill
+        self.edvr = EDVRFeatureExtractor(
+            num_frames=padding * 2 + 1,
+            center_frame_idx=padding,
+            pretrained=edvr_pretrained)
+        self.backward_fusion = nn.Conv2d(
+            2 * mid_channels, mid_channels, 3, 1, 1, bias=True)
+        self.forward_fusion = nn.Conv2d(
+            2 * mid_channels, mid_channels, 3, 1, 1, bias=True)
 
         # propagation branches
         self.backward_resblocks = ResidualBlocksWithInputConv(
             mid_channels + 3, mid_channels, num_blocks)
         self.forward_resblocks = ResidualBlocksWithInputConv(
-            mid_channels + 3, mid_channels, num_blocks)
+            2 * mid_channels + 3, mid_channels, num_blocks)
 
         # upsample
         self.fusion = nn.Conv2d(
@@ -60,6 +76,31 @@ class BasicVSRNet(nn.Module):
         # activation function
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
 
+    def spatial_padding(self, lrs):
+        """ Apply pdding spatially.
+
+        Since the PCD module in EDVR requires that the resolution is a multiple
+        of 4, we apply padding to the input LR images if their resolution is
+        not divisible by 4.
+
+        Args:
+            lrs (Tensor): Input LR sequence with shape (n, t, c, h, w).
+
+        Returns:
+            Tensor: Padded LR sequence with shape (n, t, c, h_pad, w_pad).
+
+        """
+        n, t, c, h, w = lrs.size()
+
+        pad_h = (4 - h % 4) % 4
+        pad_w = (4 - w % 4) % 4
+
+        # padding
+        lrs = lrs.view(-1, c, h, w)
+        lrs = F.pad(lrs, [0, pad_w, 0, pad_h], mode='reflect')
+
+        return lrs.view(n, t, c, h + pad_h, w + pad_w)
+
     def check_if_mirror_extended(self, lrs):
         """Check whether the input is a mirror-extended sequence.
 
@@ -75,6 +116,29 @@ class BasicVSRNet(nn.Module):
             lrs_1, lrs_2 = torch.chunk(lrs, 2, dim=1)
             if torch.norm(lrs_1 - lrs_2.flip(1)) == 0:
                 self.is_mirror_extended = True
+
+    def compute_refill_features(self, lrs, keyframe_idx):
+        """ Compute keyframe features for information-refill.
+        Since EDVR-M is used, padding is performed before feature computation.
+        Args:
+            lrs (Tensor): Input LR images with shape (n, t, c, h, w)
+            keyframe_idx (list(int)): The indices specifying the keyframes.
+        Return:
+            dict(Tensor): The keyframe features. Each key corresponds to the
+                indices in keyframe_idx.
+        """
+
+        if self.padding == 2:
+            lrs = [lrs[:, [4, 3]], lrs, lrs[:, [-4, -5]]]  # padding
+        elif self.padding == 3:
+            lrs = [lrs[:, [6, 5, 4]], lrs, lrs[:, [-5, -6, -7]]]  # padding
+        lrs = torch.cat(lrs, dim=1)
+
+        num_frames = 2 * self.padding + 1
+        feats_refill = {}
+        for i in keyframe_idx:
+            feats_refill[i] = self.edvr(lrs[:, i:i + num_frames].contiguous())
+        return feats_refill
 
     def compute_flow(self, lrs):
         """Compute optical flow using SPyNet for feature warping.
@@ -115,26 +179,38 @@ class BasicVSRNet(nn.Module):
             Tensor: Output HR sequence with shape (n, t, c, 4h, 4w).
         """
 
-        n, t, c, h, w = lrs.size()
-        assert h >= 64 and w >= 64, (
+        n, t, c, h_input, w_input = lrs.size()
+        assert h_input >= 64 and w_input >= 64, (
             'The height and width of inputs should be at least 64, '
-            f'but got {h} and {w}.')
+            f'but got {h_input} and {w_input}.')
 
         # check whether the input is an extended sequence
         self.check_if_mirror_extended(lrs)
 
-        # compute optical flow
+        lrs = self.spatial_padding(lrs)
+        h, w = lrs.size(3), lrs.size(4)
+
+        # get the keyframe indices for information-refill
+        keyframe_idx = list(range(0, t, self.keyframe_stride))
+        if keyframe_idx[-1] != t - 1:
+            keyframe_idx.append(t - 1)  # the last frame must be a keyframe
+
+        # compute optical flow and compute features for information-refill
         flows_forward, flows_backward = self.compute_flow(lrs)
+        feats_refill = self.compute_refill_features(lrs, keyframe_idx)
 
         # backward-time propgation
         outputs = []
         feat_prop = lrs.new_zeros(n, self.mid_channels, h, w)
         for i in range(t - 1, -1, -1):
-            if i < t - 1:  # no warping required for the last timestep
+            lr_curr = lrs[:, i, :, :, :]
+            if i < t - 1:  # no warping for the last timestep
                 flow = flows_backward[:, i, :, :, :]
                 feat_prop = flow_warp(feat_prop, flow.permute(0, 2, 3, 1))
-
-            feat_prop = torch.cat([lrs[:, i, :, :, :], feat_prop], dim=1)
+            if i in keyframe_idx:
+                feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)
+                feat_prop = self.backward_fusion(feat_prop)
+            feat_prop = torch.cat([lr_curr, feat_prop], dim=1)
             feat_prop = self.backward_resblocks(feat_prop)
 
             outputs.append(feat_prop)
@@ -151,13 +227,14 @@ class BasicVSRNet(nn.Module):
                     flow = flows_backward[:, -i, :, :, :]
                 feat_prop = flow_warp(feat_prop, flow.permute(0, 2, 3, 1))
 
-            feat_prop = torch.cat([lr_curr, feat_prop], dim=1)
+            if i in keyframe_idx:  # information-refill
+                feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)
+                feat_prop = self.forward_fusion(feat_prop)
+
+            feat_prop = torch.cat([lr_curr, outputs[i], feat_prop], dim=1)
             feat_prop = self.forward_resblocks(feat_prop)
 
-            # upsampling given the backward and forward features
-            out = torch.cat([outputs[i], feat_prop], dim=1)
-            out = self.lrelu(self.fusion(out))
-            out = self.lrelu(self.upsample1(out))
+            out = self.lrelu(self.upsample1(feat_prop))
             out = self.lrelu(self.upsample2(out))
             out = self.lrelu(self.conv_hr(out))
             out = self.conv_last(out)
@@ -165,7 +242,7 @@ class BasicVSRNet(nn.Module):
             out += base
             outputs[i] = out
 
-        return torch.stack(outputs, dim=1)
+        return torch.stack(outputs, dim=1)[:, :, :, :4 * h_input, :4 * w_input]
 
     def init_weights(self, pretrained=None, strict=True):
         """Init weights for models.
@@ -419,8 +496,7 @@ class SPyNetBasicModule(nn.Module):
             Tensor: Refined flow with shape (b, 2, h, w)
         """
         return self.basic_module(tensor_input)
-
-
+    
 class EDVRFeatureExtractor(nn.Module):
     """EDVR feature extractor for information-refill in IconVSR.
 

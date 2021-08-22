@@ -7,8 +7,12 @@ model = dict(
         type='BasicVSRNet',
         mid_channels=64,
         num_blocks=30,
+        keyframe_stride=5,
+        padding=2,
         spynet_pretrained='https://download.openmmlab.com/mmediting/restorers/'
-        'basicvsr/spynet_20210409-c6c1bd09.pth'),
+        'basicvsr/spynet_20210409-c6c1bd09.pth',
+        edvr_pretrained='https://download.openmmlab.com/mmediting/restorers/'
+        'iconvsr/edvrm_reds_20210413-3867262f.pth'),
     pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='mean'))
 # model training and testing settings
 train_cfg = dict(fix_iter=5000)
@@ -86,9 +90,9 @@ data = dict(
         times=1000,
         dataset=dict(
             type=train_dataset_type,
-            lq_folder='data/REDS/train_sharp_bicubic/X4',
-            gt_folder='data/REDS/train_sharp',
-            num_input_frames=15,
+            lq_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/train/train_sharp_bicubic/X4',
+            gt_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/train/train_sharp',
+            num_input_frames=10,
             pipeline=train_pipeline,
             scale=4,
             val_partition='REDS4',
@@ -96,8 +100,8 @@ data = dict(
     # val
     val=dict(
         type=val_dataset_type,
-        lq_folder='data/REDS/train_sharp_bicubic/X4',
-        gt_folder='data/REDS/train_sharp',
+        lq_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp_bicubic/X4',
+        gt_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp',
         num_input_frames=100,
         pipeline=test_pipeline,
         scale=4,
@@ -106,8 +110,8 @@ data = dict(
     # test
     test=dict(
         type=val_dataset_type,
-        lq_folder='data/REDS/train_sharp_bicubic/X4',
-        gt_folder='data/REDS/train_sharp',
+        lq_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp_bicubic/X4',
+        gt_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp',
         num_input_frames=100,
         pipeline=test_pipeline,
         scale=4,

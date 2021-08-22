@@ -45,12 +45,12 @@ class SRREDSMultipleGTDataset(BaseSRDataset):
             dict: Returned dict for LQ and GT pairs.
         """
         # generate keys
-        keys = [f'{i:03d}' for i in range(0, 270)]
+        keys = [f'{i:03d}' for i in range(0, 240)]
 
         if self.val_partition == 'REDS4':
             val_partition = ['000', '011', '015', '020']
         elif self.val_partition == 'official':
-            val_partition = [f'{i:03d}' for i in range(240, 270)]
+            val_partition = [f'{i:03d}' for i in range(0, 30)]
         else:
             raise ValueError(
                 f'Wrong validation partition {self.val_partition}.'
