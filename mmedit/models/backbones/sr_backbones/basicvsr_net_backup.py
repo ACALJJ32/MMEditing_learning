@@ -12,7 +12,7 @@ from .edvr_net import PCDAlignment, TSAFusion
 import cv2
 import numpy as np
 
-@BACKBONES.register_module()
+# @BACKBONES.register_module()
 class BasicVSRNet(nn.Module):
     """BasicVSR network structure for video super-resolution.
 
@@ -641,16 +641,8 @@ class FastHomographyAlign(nn.Module):
         # Init ORB detector
         self.orb = cv2.ORB_create(points)
         self.sift = cv2.xfeatures2d.SIFT_create()
-
-        # at least 10 points
-        self.min_match_count = 10 
-
-        # FLANN matcher; KD tree
-        index_params = dict(algorithm = 1, tree = 5)
-        search_params = dict(checks = 50)
-        self.flann = cv2.FlannBasedMatcher(index_params, search_params)
-
-    def align_frame_orb(self, target, neighbor):
+    
+    def align_frame(self, target, neighbor):
         assert isinstance(target, torch.Tensor) and isinstance(neighbor, torch.Tensor), (
             print("input target and neighbor must be torch.Tensor !")
         )
@@ -676,6 +668,9 @@ class FastHomographyAlign(nn.Module):
             kp1, des1 = self.orb.detectAndCompute(neighbor_img_gray, None)
             kp2, des2 = self.orb.detectAndCompute(target_img_gray, None)
 
+            # kp1, des1 = self.sift.detectAndCompute(neighbor_img_gray, None)
+            # kp2, des2 = self.sift.detectAndCompute(target_img_gray, None)
+
             if len(kp1) <= 4 or len(kp2) <= 4:
                 continue
             else:
@@ -687,7 +682,7 @@ class FastHomographyAlign(nn.Module):
 
                 for i, match in enumerate(matches):
                     points1[i,:] = kp1[match.queryIdx].pt
-                    points2[i:,] = kp2[match.trainIdx].pt
+                    points2[i:,] = kp2(match.trainIdx).pt
 
                 homography_matrix, mask = cv2.findHomography(points1, points2, cv2.RANSAC)
 
@@ -701,66 +696,9 @@ class FastHomographyAlign(nn.Module):
                 neighbor_align = neighbor_align.astype(np.float32) / 255.
                 neighbor_align_tensor = torch.from_numpy(neighbor_align).permute(2, 0, 1).cuda()
 
-                neighbor[i, :, :, :] = neighbor_align_tensor
+                neighbor[i, :, :, :] = neighbor_align
 
         return neighbor_align
-
-    def align_frame_sift(self, target, neighbor):
-        """ use sift to match images"""
-
-        assert isinstance(target, torch.Tensor) and isinstance(neighbor, torch.Tensor), (
-            print("input target and neighbor must be torch.Tensor !")
-        )
-
-        b, c, h, w = target.size()
-
-        for i in range(b):
-            target_img = target[i,:,:,:].cpu().clone().contiguous().detach().permute(1,2,0)
-            neighbor_img = neighbor[i,:,:,:].cpu().clone().clone().contiguous().detach().permute(1,2,0)
-
-            # get numpy array
-            target_img = target_img.numpy()
-            neighbor_img = neighbor_img.numpy()
-
-            # compute homography and align
-            target_img_gray = cv2.cvtColor(target_img, cv2.COLOR_RGB2GRAY)
-            neighbor_img_gray = cv2.cvtColor(neighbor_img, cv2.COLOR_RGB2GRAY)
-            
-            target_img_gray = cv2.normalize(target_img_gray, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
-            neighbor_img_gray = cv2.normalize(neighbor_img_gray, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
-
-            # find the keypoints and descriptors with sift
-
-            neighbor_kps, neighbor_des = self.sift.detectAndCompute(neighbor_img_gray, None)
-            target_kps, target_des = self.sift.detectAndCompute(target_img_gray, None)
-
-            # use knn algorithm
-            matches = self.flann.knnMatch(neighbor_des, target_des, k = 2)
-
-            # remove error matches
-            good = []
-            for m, n in matches:
-                if m.distance <= 0.7 * n.distance:
-                    good.append(m)
-            
-            if len(good) > self.min_match_count:
-                src_pts = np.float32([neighbor_kps[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
-                dst_pts = np.float32([target_kps[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
-                homography_matrix, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-                align_neighbor = cv2.warpPerspective(neighbor_img, homography_matrix, (w, h))
-
-                cv2.imshow("target image", target_img)
-                cv2.imshow("align image", align_neighbor)
-                cv2.waitKey(0)
-
-                # transfer numpy array to tensor
-                neighbor_align = align_neighbor.astype(np.float32) / 255.
-                neighbor_align_tensor = torch.from_numpy(neighbor_align).permute(2, 0, 1).cuda()
-                neighbor[i, :, :, :] = neighbor_align_tensor
-            else:
-                continue
-
-        return neighbor
 
     def forward(self, x):
         assert isinstance(x, torch.Tensor), (
@@ -775,8 +713,7 @@ class FastHomographyAlign(nn.Module):
         for i in range(t):
             if t != center_index:
                 neighbor = x[:, i, :, :, :].clone()
-                # x[:, i, :, :, :] = self.align_frame_orb(center_frame, neighbor)
-                x[:, i, :, :, :] = self.align_frame_sift(center_frame, neighbor)
+                x[:, i, :, :, :] = self.align_frame(center_frame, neighbor)
 
         return x
 
