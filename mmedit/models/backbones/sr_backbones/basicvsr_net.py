@@ -646,7 +646,7 @@ class FastHomographyAlign(nn.Module):
         self.min_match_count = 10 
 
         # FLANN matcher; KD tree
-        index_params = dict(algorithm = 1, tree = 5)
+        index_params = dict(algorithm = 1, trees = 5)
         search_params = dict(checks = 50)
         self.flann = cv2.FlannBasedMatcher(index_params, search_params)
 
@@ -694,8 +694,8 @@ class FastHomographyAlign(nn.Module):
                 # use homography
                 neighbor_align = cv2.warpPerspective(neighbor_img, homography_matrix, (w, h))
 
-                cv2.imshow('align img ', neighbor_align)
-                cv2.waitKey(0)
+                # cv2.imshow('align img ', neighbor_align)
+                # cv2.waitKey(0)
 
                 # transfer numpy array to tensor
                 neighbor_align = neighbor_align.astype(np.float32) / 255.
@@ -735,7 +735,13 @@ class FastHomographyAlign(nn.Module):
             target_kps, target_des = self.sift.detectAndCompute(target_img_gray, None)
 
             # use knn algorithm
-            matches = self.flann.knnMatch(neighbor_des, target_des, k = 2)
+            matches = None
+            try:
+                matches = self.flann.knnMatch(neighbor_des, target_des, k = 2)
+            except:
+                print("matches error occured !")
+
+            if matches == None: continue
 
             # remove error matches
             good = []
@@ -749,14 +755,11 @@ class FastHomographyAlign(nn.Module):
                 homography_matrix, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
                 align_neighbor = cv2.warpPerspective(neighbor_img, homography_matrix, (w, h))
 
-                cv2.imshow("target image", target_img)
-                cv2.imshow("align image", align_neighbor)
-                cv2.waitKey(0)
-
                 # transfer numpy array to tensor
                 neighbor_align = align_neighbor.astype(np.float32) / 255.
                 neighbor_align_tensor = torch.from_numpy(neighbor_align).permute(2, 0, 1).cuda()
                 neighbor[i, :, :, :] = neighbor_align_tensor
+                # print("neighbor has been aligned!")
             else:
                 continue
 
