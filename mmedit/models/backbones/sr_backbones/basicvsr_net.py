@@ -9,6 +9,7 @@ from mmedit.models.common import (PixelShufflePack, ResidualBlockNoBN,
 from mmedit.models.registry import BACKBONES
 from mmedit.utils import get_root_logger
 from .edvr_net import PCDAlignment, TSAFusion
+import cv2
 
 @BACKBONES.register_module()
 class BasicVSRNet(nn.Module):
@@ -299,7 +300,6 @@ class ResidualBlocksWithInputConv(nn.Module):
         """
         return self.main(feat)
 
-
 class SPyNet(nn.Module):
     """SPyNet network structure.
 
@@ -431,7 +431,6 @@ class SPyNet(nn.Module):
         flow[:, 1, :, :] *= float(h) / float(h_up)
 
         return flow
-
 
 class SPyNetBasicModule(nn.Module):
     """Basic Module for SPyNet.
@@ -577,6 +576,10 @@ class EDVRFeatureExtractor(nn.Module):
         elif pretrained is not None:
             raise TypeError(f'"pretrained" must be a str or None. '
                             f'But received {type(pretrained)}.')
+        
+        # Homography align
+        self.with_homography_align = True
+        self.homography_align = FastHomographyAlign()
 
     def forward(self, x):
         """Forward function for EDVRFeatureExtractor.
@@ -585,6 +588,9 @@ class EDVRFeatureExtractor(nn.Module):
         Returns:
             Tensor: Intermediate feature with shape (n, mid_channels, h, w).
         """
+
+        # Homography align
+        x = self.homography_align(x)
 
         n, t, c, h, w = x.size()
 
@@ -623,3 +629,60 @@ class EDVRFeatureExtractor(nn.Module):
             feat = self.fusion(aligned_feat)
 
         return feat
+
+class FastHomographyAlign(nn.Module):
+    def __init__(self, ):
+        super().__init__()
+    
+    def align_frame(self, target, neighbor):
+        assert isinstance(target, torch.Tensor) and isinstance(neighbor, torch.Tensor), (
+            print("input target and neighbor must be torch.Tensor !")
+        )
+        test = neighbor
+        b, c, h, w = target.size()
+        
+        for i in range(b):
+            target_img = target[i,:,:,:].cpu().clone().contiguous().detach().permute(1,2,0)
+            neighbor_img = neighbor[i,:,:,:].cpu().clone().clone().contiguous().detach().permute(1,2,0)
+
+            # get numpy array
+            target_img = target_img.numpy()
+            neighbor_img = neighbor_img.numpy()
+
+            # compute homography and align
+
+            cv2.imshow("out", target_img)
+            cv2.waitKey(0)
+
+
+        align_neighbor = neighbor
+        return test
+
+    def forward(self, x):
+        assert isinstance(x, torch.Tensor), (
+            print("input x must be torch.Tensor !")
+        )
+        test = x.clone()
+        b, t, c, h, w = x.size()
+        center_index = c // 2
+
+        center_frame = x[:, center_index, :, :, :]  # Get center frame
+
+        for i in range(t):
+            if t != center_index:
+                neighbor = x[:, i, :, :, :].clone()
+                homo_align_frame = self.align_frame(center_frame, neighbor)
+                x[:, i, :, :, :] = homo_align_frame
+
+        return test
+
+if __name__ == "__main__":
+    import os
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+    net = BasicVSRNet()
+    net.cuda()
+    net.eval()
+    x = torch.ones((1,20,3,64,64))
+    put = net(x.cuda())
+    print(x.size())
+    print(put.size())
