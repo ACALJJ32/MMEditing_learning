@@ -10,6 +10,7 @@ from mmedit.models.registry import BACKBONES
 from mmedit.utils import get_root_logger
 from .edvr_net import PCDAlignment, TSAFusion
 import cv2
+import numpy as np
 
 @BACKBONES.register_module()
 class BasicVSRNet(nn.Module):
@@ -631,14 +632,21 @@ class EDVRFeatureExtractor(nn.Module):
         return feat
 
 class FastHomographyAlign(nn.Module):
-    def __init__(self, ):
+    def __init__(self, points = 20):
         super().__init__()
+
+        # create Matcher object
+        self.matcher = cv2.DescriptorMatcher_create(cv2.DESCRIPTOR_MATCHER_BRUTEFORCE_HAMMING)
+        
+        # Init ORB detector
+        self.orb = cv2.ORB_create(points)
+        self.sift = cv2.xfeatures2d.SIFT_create()
     
     def align_frame(self, target, neighbor):
         assert isinstance(target, torch.Tensor) and isinstance(neighbor, torch.Tensor), (
             print("input target and neighbor must be torch.Tensor !")
         )
-        test = neighbor
+        neighbor_align = neighbor
         b, c, h, w = target.size()
         
         for i in range(b):
@@ -650,19 +658,53 @@ class FastHomographyAlign(nn.Module):
             neighbor_img = neighbor_img.numpy()
 
             # compute homography and align
+            target_img_gray = cv2.cvtColor(target_img, cv2.COLOR_RGB2GRAY)
+            neighbor_img_gray = cv2.cvtColor(neighbor_img, cv2.COLOR_RGB2GRAY)
+            
+            # find the keypoints and descriptors with orb
+            target_img_gray = cv2.normalize(target_img_gray, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
+            neighbor_img_gray = cv2.normalize(neighbor_img_gray, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
 
-            cv2.imshow("out", target_img)
-            cv2.waitKey(0)
+            kp1, des1 = self.orb.detectAndCompute(neighbor_img_gray, None)
+            kp2, des2 = self.orb.detectAndCompute(target_img_gray, None)
 
+            # kp1, des1 = self.sift.detectAndCompute(neighbor_img_gray, None)
+            # kp2, des2 = self.sift.detectAndCompute(target_img_gray, None)
 
-        align_neighbor = neighbor
-        return test
+            if len(kp1) <= 4 or len(kp2) <= 4:
+                continue
+            else:
+                # Match descriptors
+                matches = self.matcher.match(des1, des2, None)
+                matches = sorted(matches, key = lambda x:x.distance)
+
+                points1, points2 = np.zeros((len(matches), 2), dtype=np.float32), np.zeros((len(matches), 2), dtype=np.float32) # points (matches, 2)
+
+                for i, match in enumerate(matches):
+                    points1[i,:] = kp1[match.queryIdx].pt
+                    points2[i:,] = kp2(match.trainIdx).pt
+
+                homography_matrix, mask = cv2.findHomography(points1, points2, cv2.RANSAC)
+
+                # use homography
+                neighbor_align = cv2.warpPerspective(neighbor_img, homography_matrix, (w, h))
+
+                cv2.imshow('align img ', neighbor_align)
+                cv2.waitKey(0)
+
+                # transfer numpy array to tensor
+                neighbor_align = neighbor_align.astype(np.float32) / 255.
+                neighbor_align_tensor = torch.from_numpy(neighbor_align).permute(2, 0, 1).cuda()
+
+                neighbor[i, :, :, :] = neighbor_align
+
+        return neighbor_align
 
     def forward(self, x):
         assert isinstance(x, torch.Tensor), (
             print("input x must be torch.Tensor !")
         )
-        test = x.clone()
+
         b, t, c, h, w = x.size()
         center_index = c // 2
 
@@ -671,10 +713,9 @@ class FastHomographyAlign(nn.Module):
         for i in range(t):
             if t != center_index:
                 neighbor = x[:, i, :, :, :].clone()
-                homo_align_frame = self.align_frame(center_frame, neighbor)
-                x[:, i, :, :, :] = homo_align_frame
+                x[:, i, :, :, :] = self.align_frame(center_frame, neighbor)
 
-        return test
+        return x
 
 if __name__ == "__main__":
     import os

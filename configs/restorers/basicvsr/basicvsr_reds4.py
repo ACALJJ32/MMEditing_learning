@@ -80,7 +80,7 @@ demo_pipeline = [
 
 data = dict(
     workers_per_gpu=6,
-    train_dataloader=dict(samples_per_gpu=4, drop_last=True),  # 2 gpus
+    train_dataloader=dict(samples_per_gpu=2, drop_last=True),  # 2 gpus
     val_dataloader=dict(samples_per_gpu=1),
     test_dataloader=dict(samples_per_gpu=1, workers_per_gpu=1),
 
@@ -92,7 +92,7 @@ data = dict(
             type=train_dataset_type,
             lq_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/train/train_sharp_bicubic/X4',
             gt_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/train/train_sharp',
-            num_input_frames=10,
+            num_input_frames=15,
             pipeline=train_pipeline,
             scale=4,
             val_partition='REDS4',
@@ -140,7 +140,7 @@ checkpoint_config = dict(interval=5000, save_optimizer=True, by_epoch=False)
 # remove gpu_collect=True in non distributed training
 evaluation = dict(interval=5000, save_image=False, gpu_collect=True)
 log_config = dict(
-    interval=50,
+    interval=10,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=False),
         # dict(type='TensorboardLoggerHook'),
