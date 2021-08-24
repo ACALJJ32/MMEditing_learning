@@ -36,7 +36,8 @@ class BasicVSRNet(nn.Module):
                  keyframe_stride=5,
                  padding=2,
                  spynet_pretrained=None,
-                 edvr_pretrained=None):
+                 edvr_pretrained=None,
+                 with_homography_align=False):
 
         super().__init__()
 
@@ -51,7 +52,8 @@ class BasicVSRNet(nn.Module):
         self.edvr = EDVRFeatureExtractor(
             num_frames=padding * 2 + 1,
             center_frame_idx=padding,
-            pretrained=edvr_pretrained)
+            pretrained=edvr_pretrained,
+            with_homography_align=with_homography_align)
         self.backward_fusion = nn.Conv2d(
             2 * mid_channels, mid_channels, 3, 1, 1, bias=True)
         self.forward_fusion = nn.Conv2d(
@@ -532,7 +534,8 @@ class EDVRFeatureExtractor(nn.Module):
                  num_blocks_reconstruction=10,
                  center_frame_idx=2,
                  with_tsa=True,
-                 pretrained=None):
+                 pretrained=None,
+                 with_homography_align=False):
 
         super().__init__()
 
@@ -579,7 +582,7 @@ class EDVRFeatureExtractor(nn.Module):
                             f'But received {type(pretrained)}.')
         
         # Homography align
-        self.with_homography_align = True
+        self.with_homography_align = with_homography_align
         self.homography_align = FastHomographyAlign()
 
     def forward(self, x):
@@ -591,7 +594,8 @@ class EDVRFeatureExtractor(nn.Module):
         """
 
         # Homography align
-        x = self.homography_align(x)
+        if self.with_homography_align:
+            x = self.homography_align(x)
 
         n, t, c, h, w = x.size()
 
@@ -632,7 +636,7 @@ class EDVRFeatureExtractor(nn.Module):
         return feat
 
 class FastHomographyAlign(nn.Module):
-    def __init__(self, points = 20):
+    def __init__(self, points = 20, with_sift = True):
         super().__init__()
 
         # create Matcher object
@@ -640,6 +644,9 @@ class FastHomographyAlign(nn.Module):
         
         # Init ORB detector
         self.orb = cv2.ORB_create(points)
+
+        # Init SIFT detector
+        self.with_sift = with_sift
         self.sift = cv2.xfeatures2d.SIFT_create()
 
         # at least 10 points
@@ -651,6 +658,7 @@ class FastHomographyAlign(nn.Module):
         self.flann = cv2.FlannBasedMatcher(index_params, search_params)
 
     def align_frame_orb(self, target, neighbor):
+        """ use orb to match images """
         assert isinstance(target, torch.Tensor) and isinstance(neighbor, torch.Tensor), (
             print("input target and neighbor must be torch.Tensor !")
         )
@@ -706,7 +714,7 @@ class FastHomographyAlign(nn.Module):
         return neighbor_align
 
     def align_frame_sift(self, target, neighbor):
-        """ use sift to match images"""
+        """ use sift to match images """
 
         assert isinstance(target, torch.Tensor) and isinstance(neighbor, torch.Tensor), (
             print("input target and neighbor must be torch.Tensor !")
@@ -715,8 +723,8 @@ class FastHomographyAlign(nn.Module):
         b, c, h, w = target.size()
 
         for i in range(b):
-            target_img = target[i,:,:,:].cpu().clone().contiguous().detach().permute(1,2,0)
-            neighbor_img = neighbor[i,:,:,:].cpu().clone().clone().contiguous().detach().permute(1,2,0)
+            target_img = target[i,:,:,:].clone().cpu().contiguous().detach().permute(1,2,0)
+            neighbor_img = neighbor[i,:,:,:].clone().cpu().contiguous().detach().permute(1,2,0)
 
             # get numpy array
             target_img = target_img.numpy()
@@ -739,7 +747,7 @@ class FastHomographyAlign(nn.Module):
             try:
                 matches = self.flann.knnMatch(neighbor_des, target_des, k = 2)
             except:
-                print("matches error occured !")
+                print("Matches error occured !")
 
             if matches == None: continue
 
@@ -752,14 +760,22 @@ class FastHomographyAlign(nn.Module):
             if len(good) > self.min_match_count:
                 src_pts = np.float32([neighbor_kps[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
                 dst_pts = np.float32([target_kps[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+                
+                # compute homography matrix
                 homography_matrix, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-                align_neighbor = cv2.warpPerspective(neighbor_img, homography_matrix, (w, h))
+                
+                # warp neighbor image
+                try:
+                    align_neighbor = cv2.warpPerspective(neighbor_img, homography_matrix, (w, h))
+                except:
+                    print("Error occured in warp function !") 
+                    continue
 
                 # transfer numpy array to tensor
                 neighbor_align = align_neighbor.astype(np.float32) / 255.
                 neighbor_align_tensor = torch.from_numpy(neighbor_align).permute(2, 0, 1).cuda()
                 neighbor[i, :, :, :] = neighbor_align_tensor
-                # print("neighbor has been aligned!")
+            
             else:
                 continue
 
@@ -776,10 +792,13 @@ class FastHomographyAlign(nn.Module):
         center_frame = x[:, center_index, :, :, :]  # Get center frame
 
         for i in range(t):
-            if t != center_index:
+            if t != center_index and abs(center_index - t) == 1: 
                 neighbor = x[:, i, :, :, :].clone()
-                # x[:, i, :, :, :] = self.align_frame_orb(center_frame, neighbor)
-                x[:, i, :, :, :] = self.align_frame_sift(center_frame, neighbor)
+
+                if self.with_sift:
+                    x[:, i, :, :, :] = self.align_frame_sift(center_frame, neighbor)
+                else:
+                    x[:, i, :, :, :] = self.align_frame_orb(center_frame, neighbor)
 
         return x
 

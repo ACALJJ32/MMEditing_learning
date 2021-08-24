@@ -12,7 +12,8 @@ model = dict(
         spynet_pretrained='https://download.openmmlab.com/mmediting/restorers/'
         'basicvsr/spynet_20210409-c6c1bd09.pth',
         edvr_pretrained='https://download.openmmlab.com/mmediting/restorers/'
-        'iconvsr/edvrm_reds_20210413-3867262f.pth'),
+        'iconvsr/edvrm_reds_20210413-3867262f.pth',
+        with_homography_align=True),
     pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='mean'))
 # model training and testing settings
 train_cfg = dict(fix_iter=5000)
@@ -80,7 +81,7 @@ demo_pipeline = [
 
 data = dict(
     workers_per_gpu=6,
-    train_dataloader=dict(samples_per_gpu=2, drop_last=True),  # 2 gpus
+    train_dataloader=dict(samples_per_gpu=4, drop_last=True),  # 2 gpus  Batch size of a single GPU
     val_dataloader=dict(samples_per_gpu=1),
     test_dataloader=dict(samples_per_gpu=1, workers_per_gpu=1),
 
