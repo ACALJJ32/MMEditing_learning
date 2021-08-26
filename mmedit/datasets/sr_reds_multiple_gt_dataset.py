@@ -45,7 +45,7 @@ class SRREDSMultipleGTDataset(BaseSRDataset):
             dict: Returned dict for LQ and GT pairs.
         """
         # generate keys
-        keys = [f'{i:03d}' for i in range(0, 240)]
+        keys = [f'{i:03d}' for i in range(0, 270)]
 
         if self.val_partition == 'REDS4':
             val_partition = ['000', '011', '015', '020']

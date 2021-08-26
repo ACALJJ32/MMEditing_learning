@@ -1,4 +1,4 @@
-exp_name = 'basicvsr_reds4'
+exp_name = 'basicvsr_reds4_0825'
 
 # model settings
 model = dict(
@@ -13,7 +13,7 @@ model = dict(
         'basicvsr/spynet_20210409-c6c1bd09.pth',
         edvr_pretrained='https://download.openmmlab.com/mmediting/restorers/'
         'iconvsr/edvrm_reds_20210413-3867262f.pth',
-        with_homography_align=True),
+        with_homography_align=False),
     pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='mean'))
 # model training and testing settings
 train_cfg = dict(fix_iter=5000)
@@ -101,8 +101,10 @@ data = dict(
     # val
     val=dict(
         type=val_dataset_type,
-        lq_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp_bicubic/X4',
-        gt_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp',
+        # lq_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp_bicubic/X4',
+        # gt_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp',
+        lq_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/train/train_sharp_bicubic/X4',
+        gt_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/train/train_sharp',
         num_input_frames=100,
         pipeline=test_pipeline,
         scale=4,
@@ -111,8 +113,10 @@ data = dict(
     # test
     test=dict(
         type=val_dataset_type,
-        lq_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp_bicubic/X4',
-        gt_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp',
+        # lq_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp_bicubic/X4',
+        # gt_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp',
+        lq_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/train/train_sharp_bicubic/X4',
+        gt_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/train/train_sharp',
         num_input_frames=100,
         pipeline=test_pipeline,
         scale=4,
