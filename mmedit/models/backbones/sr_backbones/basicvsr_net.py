@@ -80,6 +80,10 @@ class BasicVSRNet(nn.Module):
         # activation function
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
 
+        # DFT feature extractor
+        self.with_dft_feature_extractor = False
+        self.dft_feature_extractor = DftFeatureExtractor()
+
     def spatial_padding(self, lrs):
         """ Apply pdding spatially.
 
@@ -263,7 +267,6 @@ class BasicVSRNet(nn.Module):
         elif pretrained is not None:
             raise TypeError(f'"pretrained" must be a str or None. '
                             f'But received {type(pretrained)}.')
-
 
 class ResidualBlocksWithInputConv(nn.Module):
     """Residual blocks with a convolution in front.
@@ -819,11 +822,9 @@ class DftFeatureExtractor(nn.Module):
             print("lr must be Torch.Tensor!")
         )
 
-        
+        print("lr shape: ", lr.shape)
 
-
-
-
+        # lr_np = lr.clone().detach().cpu()
 
 if __name__ == "__main__":
     import os
