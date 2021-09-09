@@ -802,6 +802,29 @@ class FastHomographyAlign(nn.Module):
 
         return x
 
+class DftFeatureExtractor(nn.Module):
+    def __init__(self):
+        super().__init__()
+    
+    def compute_dft_feature(self, lr):
+        """
+            Args
+                lr: A feature map. 
+            
+            Returns
+                
+        """
+        
+        assert isinstance(lr, torch.Tensor), (
+            print("lr must be Torch.Tensor!")
+        )
+
+        
+
+
+
+
+
 if __name__ == "__main__":
     import os
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'

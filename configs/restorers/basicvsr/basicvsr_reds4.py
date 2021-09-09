@@ -1,4 +1,4 @@
-exp_name = 'basicvsr_reds4_0825'
+exp_name = 'basicvsr_reds4_0909'
 
 # model settings
 model = dict(
