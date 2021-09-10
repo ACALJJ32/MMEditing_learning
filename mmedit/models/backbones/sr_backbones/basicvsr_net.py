@@ -218,7 +218,11 @@ class BasicVSRNet(nn.Module):
             if i in keyframe_idx:
                 feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)
                 feat_prop = self.backward_fusion(feat_prop)
-            feat_prop = torch.cat([lr_curr, feat_prop], dim=1)
+
+            # DFT feature extractor
+            dft_feature = self.dft_feature_extractor(lr_curr)
+
+            feat_prop = torch.cat([lr_curr, feat_prop], dim=1)  # [b, mid_channel + 3, h, w]
             feat_prop = self.backward_resblocks(feat_prop)
 
             outputs.append(feat_prop)
@@ -809,30 +813,61 @@ class DftFeatureExtractor(nn.Module):
     def __init__(self):
         super().__init__()
     
-    def compute_dft_feature(self, lr):
+    def get_amplitude(self, lr_feature):
+        assert isinstance(lr_feature, np.ndarray), (
+            print("lr_feature must be np.ndarray!")
+        )
+
+        lr_feature_gray = cv2.cvtColor(lr_feature, cv2.COLOR_BGR2GRAY)
+
+        dft_feature = cv2.dft(np.float32(lr_feature_gray), flags=cv2.DFT_COMPLEX_OUTPUT)
+        dft_feature_shift = np.fft.fftshift(dft_feature)
+
+        magnitude_spectrum = 20 * np.log(cv2.magnitude(dft_feature_shift[..., 0], dft_feature_shift[..., 1]))
+        magnitude_spectrum_zeroOne = cv2.normalize(magnitude_spectrum, None, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+
+        return magnitude_spectrum_zeroOne
+    
+    def get_phase(self, lr_feature):
+        assert isinstance(lr_feature, np.ndarray), (
+            print("lr_feature must be np.ndarray!")
+        )
+
+        lr_feature_gray = cv2.cvtColor(lr_feature, cv2.COLOR_BGR2GRAY)
+
+        dft_feature = np.fft.fft2(lr_feature_gray)
+        dft_feature_shift = np.fft.fftshift(dft_feature)
+
+        phase_feature = np.angle(dft_feature_shift)
+        phase_feature_zeroOne = cv2.normalize(phase_feature, None, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+
+        return phase_feature_zeroOne
+
+    def forward(self, lr):
         """
-            Args
-                lr: A feature map. 
-            
-            Returns
-                
+        Args
+            lr: Feature map. 
+
+        Returns  
+            DFT feature maps of lr image.              
         """
-        
+
         assert isinstance(lr, torch.Tensor), (
             print("lr must be Torch.Tensor!")
         )
 
-        print("lr shape: ", lr.shape)
+        b, c, h, w = lr.size()
+        dft_feature = torch.zeros((b, 2, h, w))
 
-        # lr_np = lr.clone().detach().cpu()
+        for i in range(b):
+            lr_np = lr[i, ...].clone().detach().cpu().permute(1,2,0).numpy()  # shape: [h, w, c]
 
-if __name__ == "__main__":
-    import os
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-    net = BasicVSRNet()
-    net.cuda()
-    net.eval()
-    x = torch.ones((1,20,3,64,64))
-    put = net(x.cuda())
-    print(x.size())
-    print(put.size())
+            magnitude_spectrum_zeroOne = self.get_amplitude(lr_np)  # [h, w]
+            phase_feature_zeroOne = self.get_phase(lr_np)  # [h, w]
+
+            magnitude_spectrum_zeroOne = torch.from_numpy(magnitude_spectrum_zeroOne)
+            phase_feature_zeroOne = torch.from_numpy(phase_feature_zeroOne)
+            
+            dft_feature[i, ...] = torch.stack((magnitude_spectrum_zeroOne, phase_feature_zeroOne), dim=0).cuda()
+            
+        return dft_feature

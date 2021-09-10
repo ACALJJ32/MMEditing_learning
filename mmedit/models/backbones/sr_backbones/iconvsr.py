@@ -391,3 +391,15 @@ class EDVRFeatureExtractor(nn.Module):
             feat = self.fusion(aligned_feat)
 
         return feat
+
+
+# if __name__ == "__main__":
+#     import os
+#     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+#     net = BasicVSRNet()
+#     net.cuda()
+#     net.eval()
+#     x = torch.ones((1,20,3,64,64))
+#     put = net(x.cuda())
+#     print(x.size())
+#     print(put.size())
