@@ -37,7 +37,8 @@ class BasicVSRNet(nn.Module):
                  padding=2,
                  spynet_pretrained=None,
                  edvr_pretrained=None,
-                 with_homography_align=False):
+                 with_homography_align=False,
+                 with_dft=False):
 
         super().__init__()
 
@@ -81,8 +82,8 @@ class BasicVSRNet(nn.Module):
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
 
         # DFT feature extractor
-        self.with_dft_feature_extractor = False
-        self.dft_feature_extractor = DftFeatureExtractor()
+        self.with_dft_feature_extractor = with_dft
+        self.dft_feature_extractor = DftFeatureExtractor(6, mid_channels)
 
     def spatial_padding(self, lrs):
         """ Apply pdding spatially.
@@ -220,9 +221,10 @@ class BasicVSRNet(nn.Module):
                 feat_prop = self.backward_fusion(feat_prop)
 
             # DFT feature extractor
-            dft_feature = self.dft_feature_extractor(lr_curr)
+            # dft_feature = self.dft_feature_extractor(lr_curr)  # [b, c, h, w]
 
-            feat_prop = torch.cat([lr_curr, feat_prop], dim=1)  # [b, mid_channel + 3, h, w]
+            feat_prop = torch.cat([lr_curr, feat_prop], dim=1) # [b, mid_channel*2 + 3, h, w]
+            # feat_prop = torch.cat([lr_curr, feat_prop], dim=1)  # [b, mid_channel + 3, h, w]
             feat_prop = self.backward_resblocks(feat_prop)
 
             outputs.append(feat_prop)
@@ -244,14 +246,19 @@ class BasicVSRNet(nn.Module):
                 feat_prop = self.forward_fusion(feat_prop)
 
             feat_prop = torch.cat([lr_curr, outputs[i], feat_prop], dim=1)
-            feat_prop = self.forward_resblocks(feat_prop)
+            feat_prop = self.forward_resblocks(feat_prop)  # [b, mid_channel, h, w]
+
+            # DFT feature extractor
+            if self.with_dft_feature_extractor:
+                dft_feature = self.dft_feature_extractor(lr_curr)  # [b, c, h, w]
+                feat_prop += dft_feature
 
             out = self.lrelu(self.upsample1(feat_prop))
             out = self.lrelu(self.upsample2(out))
             out = self.lrelu(self.conv_hr(out))
             out = self.conv_last(out)
             base = self.img_upsample(lr_curr)
-            out += base
+            out += base  # [b, c, h, w]
             outputs[i] = out
 
         return torch.stack(outputs, dim=1)[:, :, :, :4 * h_input, :4 * w_input]
@@ -648,9 +655,6 @@ class FastHomographyAlign(nn.Module):
 
         # create Matcher object
         self.matcher = cv2.DescriptorMatcher_create(cv2.DESCRIPTOR_MATCHER_BRUTEFORCE_HAMMING)
-        
-        # Init ORB detector
-        self.orb = cv2.ORB_create(points)
 
         # Init SIFT detector
         self.with_sift = with_sift
@@ -663,62 +667,6 @@ class FastHomographyAlign(nn.Module):
         index_params = dict(algorithm = 1, trees = 5)
         search_params = dict(checks = 50)
         self.flann = cv2.FlannBasedMatcher(index_params, search_params)
-
-    def align_frame_orb(self, target, neighbor):
-        """ use orb to match images """
-        assert isinstance(target, torch.Tensor) and isinstance(neighbor, torch.Tensor), (
-            print("input target and neighbor must be torch.Tensor !")
-        )
-        neighbor_align = neighbor
-        b, c, h, w = target.size()
-        
-        for i in range(b):
-            target_img = target[i,:,:,:].cpu().clone().contiguous().detach().permute(1,2,0)
-            neighbor_img = neighbor[i,:,:,:].cpu().clone().clone().contiguous().detach().permute(1,2,0)
-
-            # get numpy array
-            target_img = target_img.numpy()
-            neighbor_img = neighbor_img.numpy()
-
-            # compute homography and align
-            target_img_gray = cv2.cvtColor(target_img, cv2.COLOR_RGB2GRAY)
-            neighbor_img_gray = cv2.cvtColor(neighbor_img, cv2.COLOR_RGB2GRAY)
-            
-            # find the keypoints and descriptors with orb
-            target_img_gray = cv2.normalize(target_img_gray, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
-            neighbor_img_gray = cv2.normalize(neighbor_img_gray, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
-
-            kp1, des1 = self.orb.detectAndCompute(neighbor_img_gray, None)
-            kp2, des2 = self.orb.detectAndCompute(target_img_gray, None)
-
-            if len(kp1) <= 4 or len(kp2) <= 4:
-                continue
-            else:
-                # Match descriptors
-                matches = self.matcher.match(des1, des2, None)
-                matches = sorted(matches, key = lambda x:x.distance)
-
-                points1, points2 = np.zeros((len(matches), 2), dtype=np.float32), np.zeros((len(matches), 2), dtype=np.float32) # points (matches, 2)
-
-                for i, match in enumerate(matches):
-                    points1[i,:] = kp1[match.queryIdx].pt
-                    points2[i:,] = kp2[match.trainIdx].pt
-
-                homography_matrix, mask = cv2.findHomography(points1, points2, cv2.RANSAC)
-
-                # use homography
-                neighbor_align = cv2.warpPerspective(neighbor_img, homography_matrix, (w, h))
-
-                # cv2.imshow('align img ', neighbor_align)
-                # cv2.waitKey(0)
-
-                # transfer numpy array to tensor
-                neighbor_align = neighbor_align.astype(np.float32) / 255.
-                neighbor_align_tensor = torch.from_numpy(neighbor_align).permute(2, 0, 1).cuda()
-
-                neighbor[i, :, :, :] = neighbor_align_tensor
-
-        return neighbor_align
 
     def align_frame_sift(self, target, neighbor):
         """ use sift to match images """
@@ -799,32 +747,45 @@ class FastHomographyAlign(nn.Module):
         center_frame = x[:, center_index, :, :, :]  # Get center frame
 
         for i in range(t):
-            if t != center_index and abs(center_index - t) == 1: 
+            if t != center_index: # abs(center_index - t) == 1
                 neighbor = x[:, i, :, :, :].clone()
 
                 if self.with_sift:
                     x[:, i, :, :, :] = self.align_frame_sift(center_frame, neighbor)
-                else:
-                    x[:, i, :, :, :] = self.align_frame_orb(center_frame, neighbor)
-
+                
         return x
 
 class DftFeatureExtractor(nn.Module):
-    def __init__(self):
+    def __init__(self, in_channels, out_channels=64, num_blocks=30):
         super().__init__()
+        self.conv_first = nn.Conv2d(in_channels, out_channels, 3, 1, 1, bias=True)
+        self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
+
+        main = []
+
+        main.append(
+            make_layer(
+                ResidualBlockNoBN, num_blocks, mid_channels=out_channels))
+
+        self.main = nn.Sequential(*main)
+        self.conv_last = nn.Conv2d(out_channels, out_channels, 3, 1, 1, bias=True)
     
     def get_amplitude(self, lr_feature):
         assert isinstance(lr_feature, np.ndarray), (
             print("lr_feature must be np.ndarray!")
         )
 
-        lr_feature_gray = cv2.cvtColor(lr_feature, cv2.COLOR_BGR2GRAY)
+        magnitude_spectrum_zeroOne = np.zeros_like(lr_feature)
 
-        dft_feature = cv2.dft(np.float32(lr_feature_gray), flags=cv2.DFT_COMPLEX_OUTPUT)
-        dft_feature_shift = np.fft.fftshift(dft_feature)
+        for i in range(3):
+            lr_feature_gray = lr_feature[...,i]
+            lr_feature_gray = cv2.normalize(lr_feature_gray, None, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 
-        magnitude_spectrum = 20 * np.log(cv2.magnitude(dft_feature_shift[..., 0], dft_feature_shift[..., 1]))
-        magnitude_spectrum_zeroOne = cv2.normalize(magnitude_spectrum, None, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+            dft_feature = cv2.dft(np.float32(lr_feature_gray), flags=cv2.DFT_COMPLEX_OUTPUT)
+            dft_feature_shift = np.fft.fftshift(dft_feature)
+
+            magnitude_spectrum = cv2.magnitude(dft_feature_shift[..., 0], dft_feature_shift[..., 1])
+            magnitude_spectrum_zeroOne[..., i] = cv2.normalize(magnitude_spectrum, None, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 
         return magnitude_spectrum_zeroOne
     
@@ -833,15 +794,41 @@ class DftFeatureExtractor(nn.Module):
             print("lr_feature must be np.ndarray!")
         )
 
-        lr_feature_gray = cv2.cvtColor(lr_feature, cv2.COLOR_BGR2GRAY)
+        phase_feature_zeroOne = np.zeros_like(lr_feature)
 
-        dft_feature = np.fft.fft2(lr_feature_gray)
-        dft_feature_shift = np.fft.fftshift(dft_feature)
+        for i in range(3):
+            lr_feature_gray = lr_feature[..., i]
+            lr_feature_gray = cv2.normalize(lr_feature_gray, None, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 
-        phase_feature = np.angle(dft_feature_shift)
-        phase_feature_zeroOne = cv2.normalize(phase_feature, None, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+            dft_feature = np.fft.fft2(lr_feature_gray)
+            dft_feature_shift = np.fft.fftshift(dft_feature)
+
+            phase_feature = np.angle(dft_feature_shift)
+            phase_feature_zeroOne[..., i] = cv2.normalize(phase_feature, None, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 
         return phase_feature_zeroOne
+
+    def get_dft_feature(self, lr):
+
+        assert isinstance(lr, torch.Tensor), (
+            print("lr must be Torch.Tensor!")
+        )
+
+        b, c, h, w = lr.size()
+        dft_feature = torch.zeros((b, 2 * c, h, w))
+
+        for i in range(b):
+            lr_np = lr[i, ...].clone().detach().cpu().permute(1,2,0).numpy()  # shape: [h, w, c]
+
+            magnitude_spectrum_zeroOne = self.get_amplitude(lr_np)  # [h, w]
+            phase_feature_zeroOne = self.get_phase(lr_np)  # [h, w]
+
+            magnitude_spectrum_zeroOne = torch.from_numpy(magnitude_spectrum_zeroOne).permute(2,0,1)
+            phase_feature_zeroOne = torch.from_numpy(phase_feature_zeroOne).permute(2,0,1)
+
+            dft_feature[i, ...] = torch.cat((magnitude_spectrum_zeroOne, phase_feature_zeroOne), dim=0).cuda()
+            
+        return dft_feature
 
     def forward(self, lr):
         """
@@ -851,23 +838,17 @@ class DftFeatureExtractor(nn.Module):
         Returns  
             DFT feature maps of lr image.              
         """
-
         assert isinstance(lr, torch.Tensor), (
             print("lr must be Torch.Tensor!")
         )
 
         b, c, h, w = lr.size()
-        dft_feature = torch.zeros((b, 2, h, w))
+        dft_feature = self.get_dft_feature(lr)
+        dft_feature = dft_feature.cuda() # [b, in_channel * 2, h, w]
+        
+        dft_feature_first = self.lrelu(self.conv_first(dft_feature))
+        dft_feature_gt = self.main(dft_feature_first)  # [b, mid_channels, h, w]
 
-        for i in range(b):
-            lr_np = lr[i, ...].clone().detach().cpu().permute(1,2,0).numpy()  # shape: [h, w, c]
+        dft_feature_gt = self.lrelu(self.conv_last(dft_feature_gt))
 
-            magnitude_spectrum_zeroOne = self.get_amplitude(lr_np)  # [h, w]
-            phase_feature_zeroOne = self.get_phase(lr_np)  # [h, w]
-
-            magnitude_spectrum_zeroOne = torch.from_numpy(magnitude_spectrum_zeroOne)
-            phase_feature_zeroOne = torch.from_numpy(phase_feature_zeroOne)
-            
-            dft_feature[i, ...] = torch.stack((magnitude_spectrum_zeroOne, phase_feature_zeroOne), dim=0).cuda()
-            
-        return dft_feature
+        return dft_feature_gt
