@@ -12,6 +12,8 @@ from .edvr_net import PCDAlignment, TSAFusion
 import cv2
 import numpy as np
 import math
+from .raft_net import BasicUpdateBlock, SmallUpdateBlock, BasicEncoder, SmallEncoder, CorrBlock, AlternateCorrBlock
+from utils.utils import bilinear_sampler, coords_grid, upflow8
 
 @BACKBONES.register_module()
 class BasicVSRNet(nn.Module):
