@@ -64,8 +64,7 @@ def focal_loss(pred, target, eps=1e-12, alpha=1.0):
     Returns:
         Tensor: Calculated Charbonnier loss.
     """
-    n, c, h, w = pred.size()
-
+    
     # 2D DFT with orthonnomalization
     pred_fft = torch.fft.fft2(pred, norm='ortho')
     target_fft = torch.fft.fft2(target, norm='ortho')
@@ -80,10 +79,9 @@ def focal_loss(pred, target, eps=1e-12, alpha=1.0):
 
     # normalization weight mat to [0, 1]
     norm_weight_mat = (weight_mat - torch.min(weight_mat)) / (torch.max(weight_mat) - torch.min(weight_mat))
-
     prod = torch.mul(squared_mat, norm_weight_mat)
 
-    return torch.sum(prod) / (h * w * c)
+    return prod
 
 @LOSSES.register_module()
 class L1Loss(nn.Module):
