@@ -709,7 +709,7 @@ class FastHomographyAlign(nn.Module):
             # remove error matches
             good = []
             for m, n in matches:
-                if m.distance <= 0.7 * n.distance:
+                if m.distance <= 0.8 * n.distance:
                     good.append(m)
             
             if len(good) > self.min_match_count:
@@ -747,7 +747,7 @@ class FastHomographyAlign(nn.Module):
         center_frame = x[:, center_index, :, :, :]  # Get center frame
 
         for i in range(t):
-            if t != center_index: # abs(center_index - t) == 1
+            if i != center_index and abs(center_index-i) == 1: # abs(center_index - i) == 1
                 neighbor = x[:, i, :, :, :].clone()
 
                 if self.with_sift:
