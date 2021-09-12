@@ -11,6 +11,7 @@ from mmedit.utils import get_root_logger
 from .edvr_net import PCDAlignment, TSAFusion
 import cv2
 import numpy as np
+import math
 
 @BACKBONES.register_module()
 class BasicVSRNet(nn.Module):
@@ -83,7 +84,7 @@ class BasicVSRNet(nn.Module):
 
         # DFT feature extractor
         self.with_dft_feature_extractor = with_dft
-        self.dft_feature_extractor = DftFeatureExtractor(6, mid_channels)
+        self.dft_feature_extractor = DftFeatureExtractor(mid_channels)
 
     def spatial_padding(self, lrs):
         """ Apply pdding spatially.
@@ -709,7 +710,7 @@ class FastHomographyAlign(nn.Module):
             # remove error matches
             good = []
             for m, n in matches:
-                if m.distance <= 0.8 * n.distance:
+                if m.distance <= 0.4 * n.distance:
                     good.append(m)
             
             if len(good) > self.min_match_count:
@@ -756,20 +757,27 @@ class FastHomographyAlign(nn.Module):
         return x
 
 class DftFeatureExtractor(nn.Module):
-    def __init__(self, in_channels, out_channels=64, num_blocks=30):
+    def __init__(self, mid_channels=64, num_blocks=6):
         super().__init__()
-        self.conv_first = nn.Conv2d(in_channels, out_channels, 3, 1, 1, bias=True)
+        self.conv_first = nn.Conv2d(3, mid_channels, 3, 1, 1, bias=True)
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
 
         main = []
-
         main.append(
             make_layer(
-                ResidualBlockNoBN, num_blocks, mid_channels=out_channels))
-
+                ResidualBlockNoBN, num_blocks, mid_channels=mid_channels))
         self.main = nn.Sequential(*main)
-        self.conv_last = nn.Conv2d(out_channels, out_channels, 3, 1, 1, bias=True)
-    
+
+        self.conv_middle = nn.Conv2d(2*mid_channels, mid_channels, 3, 1, 1, bias=True)
+
+        feature_extractor = []
+        feature_extractor.append(
+            make_layer(
+                ResidualBlockNoBN, num_blocks, mid_channels=mid_channels))
+        self.feature_extractor = nn.Sequential(*feature_extractor)
+
+        self.conv_last = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=True)
+
     def get_amplitude(self, lr_feature):
         assert isinstance(lr_feature, np.ndarray), (
             print("lr_feature must be np.ndarray!")
@@ -830,6 +838,13 @@ class DftFeatureExtractor(nn.Module):
             
         return dft_feature
 
+    def get_amplitude_map(self,fft):
+        assert isinstance(fft, torch.Tensor), (
+            print('Input must be tensor.')
+        )
+
+        n, h, w = fft.size()
+
     def forward(self, lr):
         """
         Args
@@ -843,12 +858,38 @@ class DftFeatureExtractor(nn.Module):
         )
 
         b, c, h, w = lr.size()
-        dft_feature = self.get_dft_feature(lr)
-        dft_feature = dft_feature.cuda() # [b, in_channel * 2, h, w]
+
+        x = self.lrelu(self.conv_first(lr))  # [b, mid_channels, h, w]
+        x = self.main(x)   # [b, mid_channels, h, w]
+
+        # B = torch.randn(h, w)
+        x_proj = (2 * math.pi * x)
+        dft_feature = torch.cat((torch.sin(x_proj), torch.cos(x_proj)),dim=1)  # [b, 2 * mid_channels, h, w]
+
+        dft_feature = self.lrelu(self.conv_middle(dft_feature))
+        dft_feature = self.feature_extractor(dft_feature)
+
+        dft_feature = self.lrelu(self.conv_last(dft_feature))
+
+        # fft = torch.fft.fft2(x)  # [b, mid_channels, h, w]
+        # fft = fft.contiguous().view(-1, h, w)
+
+        # print('fft size: ', fft.size())
+        # amplitude = torch.fft
         
-        dft_feature_first = self.lrelu(self.conv_first(dft_feature))
-        dft_feature_gt = self.main(dft_feature_first)  # [b, mid_channels, h, w]
+        # dft_feature = self.main(fftshit)
+        # dft_feature = self.conv_last(dft_feature)
 
-        dft_feature_gt = self.lrelu(self.conv_last(dft_feature_gt))
+        ################################ In pixel level ##################################
+        # dft_feature = self.get_dft_feature(lr)
+        # dft_feature = dft_feature.cuda() # [b, in_channel * 2, h, w]
+            
+        # dft_feature_first = self.lrelu(self.conv_first(dft_feature))
+        # dft_feature_gt = self.main(dft_feature_first)  # [b, mid_channels, h, w]
 
-        return dft_feature_gt
+        # dft_feature_gt = self.lrelu(self.conv_last(dft_feature_gt))
+        
+        # Feature level
+        ##################################################################################
+
+        return dft_feature

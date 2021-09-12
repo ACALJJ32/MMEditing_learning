@@ -1,7 +1,9 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+from cv2 import norm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.modules import distance
 
 from ..registry import LOSSES
 from .utils import masked_loss
@@ -50,6 +52,38 @@ def charbonnier_loss(pred, target, eps=1e-12):
     """
     return torch.sqrt((pred - target)**2 + eps)
 
+
+@masked_loss
+def focal_loss(pred, target, eps=1e-12, alpha=1.0):
+    """Charbonnier loss.
+
+    Args:
+        pred (Tensor): Prediction Tensor with shape (n, c, h, w).
+        target ([type]): Target Tensor with shape (n, c, h, w).
+
+    Returns:
+        Tensor: Calculated Charbonnier loss.
+    """
+    n, c, h, w = pred.size()
+
+    # 2D DFT with orthonnomalization
+    pred_fft = torch.fft.fft2(pred, norm='ortho')
+    target_fft = torch.fft.fft2(target, norm='ortho')
+
+    x_dist = (target_fft.real - pred_fft.real) ** 2
+    y_dist = (target_fft.imag - pred_fft.imag) ** 2
+
+    distance_mat = torch.sqrt(x_dist + y_dist + eps)
+    squared_mat = distance_mat ** 2
+
+    weight_mat = distance_mat ** alpha
+
+    # normalization weight mat to [0, 1]
+    norm_weight_mat = (weight_mat - torch.min(weight_mat)) / (torch.max(weight_mat) - torch.min(weight_mat))
+
+    prod = torch.mul(squared_mat, norm_weight_mat)
+
+    return torch.sum(prod) / (h * w * c)
 
 @LOSSES.register_module()
 class L1Loss(nn.Module):
@@ -219,3 +253,41 @@ class MaskedTVLoss(L1Loss):
         loss = x_diff + y_diff
 
         return loss
+
+
+
+@LOSSES.register_module()
+class MultiLoss(nn.Module):
+    def __init__(self, loss_weight=1.0, reduction='mean', sample_wise=False, eps=1e-12):
+        super().__init__()
+
+        if reduction not in ['none', 'mean', 'sum']:
+            raise ValueError(f'Unsupported reduction mode: {reduction}. '
+                             f'Supported ones are: {_reduction_modes}')
+        
+        self.loss_weight = loss_weight
+        self.reduction = reduction
+        self.sample_wise = sample_wise
+        self.eps = eps
+
+    def forward(self, pred, target, weight=None, **kwargs):
+        """Forward Function.
+
+        Args:
+            pred (Tensor): of shape (N, C, H, W). Predicted tensor.
+            target (Tensor): of shape (N, C, H, W). Ground truth tensor.
+            weight (Tensor, optional): of shape (N, C, H, W). Element-wise
+                weights. Default: None.
+        """
+
+        charbonnier_loss_ = charbonnier_loss(
+            pred,
+            target,
+            weight,
+            eps=self.eps,
+            reduction=self.reduction,
+            sample_wise=self.sample_wise)
+
+        focal_loss_ = focal_loss(pred, target)
+
+        return self.loss_weight * charbonnier_loss_ + self.loss_weight * focal_loss_

@@ -1,4 +1,4 @@
-exp_name = 'basicvsr_reds4_0911'
+exp_name = 'basicvsr_reds4_0912'
 
 # model settings
 model = dict(
@@ -7,14 +7,14 @@ model = dict(
         type='BasicVSRNet',
         mid_channels=64,
         num_blocks=30,
-        keyframe_stride=5,
+        keyframe_stride=1,
         padding=2,
         spynet_pretrained='https://download.openmmlab.com/mmediting/restorers/'
         'basicvsr/spynet_20210409-c6c1bd09.pth',
         edvr_pretrained='https://download.openmmlab.com/mmediting/restorers/'
         'iconvsr/edvrm_reds_20210413-3867262f.pth',
-        with_homography_align=False,
-        with_dft=False),
+        with_homography_align=True,
+        with_dft=True),
     pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='mean'))
 # model training and testing settings
 train_cfg = dict(fix_iter=5000)
