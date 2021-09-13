@@ -99,7 +99,7 @@ class BasicVSRNet(nn.Module):
 
         # DFT feature extractor
         self.with_dft_feature_extractor = with_dft
-        self.dft_feature_extractor = DftFeatureExtractor(mid_channels)
+        self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=10)
 
     def spatial_padding(self, lrs):
         """ Apply pdding spatially.
@@ -233,15 +233,16 @@ class BasicVSRNet(nn.Module):
                 flow = flows_backward[:, i, :, :, :]
                 feat_prop = flow_warp(feat_prop, flow.permute(0, 2, 3, 1))
             if i in keyframe_idx:
-                feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)
-                feat_prop = self.backward_fusion(feat_prop)
+                feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)  # [b, 2 * mid_channles, h, w]
+                feat_prop = self.backward_fusion(feat_prop)  # [b, mid_channels, h, w]
+
+            feat_prop = torch.cat([lr_curr, feat_prop], dim=1) # [b, mid_channel + 3, h, w]
+            feat_prop = self.backward_resblocks(feat_prop)
 
             # DFT feature extractor
-            # dft_feature = self.dft_feature_extractor(lr_curr)  # [b, c, h, w]
-
-            feat_prop = torch.cat([lr_curr, feat_prop], dim=1) # [b, mid_channel*2 + 3, h, w]
-            # feat_prop = torch.cat([lr_curr, feat_prop], dim=1)  # [b, mid_channel + 3, h, w]
-            feat_prop = self.backward_resblocks(feat_prop)
+            if self.with_dft_feature_extractor:
+                dft_feature = self.dft_feature_extractor(lr_curr)  # [b, mid_channels, h, w]
+                feat_prop += dft_feature            
 
             outputs.append(feat_prop)
         outputs = outputs[::-1]
@@ -267,9 +268,9 @@ class BasicVSRNet(nn.Module):
             # DFT feature extractor
             if self.with_dft_feature_extractor:
                 dft_feature = self.dft_feature_extractor(lr_curr)  # [b, mid_channels, h, w]
-                feat_prop = torch.cat((dft_feature, feat_prop), dim=1)  # [b, 2 * mid_channels, h, w]
-                # feat_prop += dft_feature
-                feat_prop = self.lrelu(self.fusion(feat_prop))
+                # feat_prop = torch.cat((dft_feature, feat_prop), dim=1)  # [b, 2 * mid_channels, h, w]
+                feat_prop += dft_feature
+                # feat_prop = self.lrelu(self.fusion(feat_prop))
 
             out = self.lrelu(self.upsample1(feat_prop))
             out = self.lrelu(self.upsample2(out))
@@ -896,7 +897,7 @@ class FastHomographyAlign(nn.Module):
         return x
 
 class DftFeatureExtractor(nn.Module):
-    def __init__(self, mid_channels=64, num_blocks=6):
+    def __init__(self, mid_channels=64, num_blocks=10):
         super().__init__()
         self.conv_first = nn.Conv2d(3, mid_channels, 3, 1, 1, bias=True)
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
@@ -987,7 +988,7 @@ class DftFeatureExtractor(nn.Module):
     def forward(self, lr):
         """
         Args
-            lr: Feature map. 
+            lr: low resolution images. 
 
         Returns  
             DFT feature maps of lr image.              
@@ -995,8 +996,6 @@ class DftFeatureExtractor(nn.Module):
         assert isinstance(lr, torch.Tensor), (
             print("lr must be Torch.Tensor!")
         )
-
-        b, c, h, w = lr.size()
 
         x = self.lrelu(self.conv_first(lr))  # [b, mid_channels, h, w]
         x = self.main(x)   # [b, mid_channels, h, w]
@@ -1009,15 +1008,6 @@ class DftFeatureExtractor(nn.Module):
         dft_feature = self.feature_extractor(dft_feature)
 
         dft_feature = self.lrelu(self.conv_last(dft_feature))
-
-        # fft = torch.fft.fft2(x)  # [b, mid_channels, h, w]
-        # fft = fft.contiguous().view(-1, h, w)
-
-        # print('fft size: ', fft.size())
-        # amplitude = torch.fft
-        
-        # dft_feature = self.main(fftshit)
-        # dft_feature = self.conv_last(dft_feature)
 
         ################################ In pixel level ##################################
         # dft_feature = self.get_dft_feature(lr)
