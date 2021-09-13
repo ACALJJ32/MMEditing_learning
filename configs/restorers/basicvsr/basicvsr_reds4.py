@@ -15,7 +15,7 @@ model = dict(
         'iconvsr/edvrm_reds_20210413-3867262f.pth',
         with_homography_align=False,
         with_dft=True),
-    pixel_loss=dict(type='MultiLoss', loss_weight=1.0, reduction='mean'))
+    pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='mean'))
 # model training and testing settings
 train_cfg = dict(fix_iter=5000)
 test_cfg = dict(metrics=['PSNR', 'SSIM'], crop_border=0)

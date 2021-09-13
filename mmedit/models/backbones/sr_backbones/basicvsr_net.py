@@ -12,8 +12,8 @@ from .edvr_net import PCDAlignment, TSAFusion
 import cv2
 import numpy as np
 import math
-from .raft_net import BasicUpdateBlock, SmallUpdateBlock, BasicEncoder, SmallEncoder, CorrBlock, AlternateCorrBlock
-# from utils.utils import bilinear_sampler, coords_grid, upflow8
+from .raft_net import BasicUpdateBlock, SmallUpdateBlock, BasicEncoder, SmallEncoder, CorrBlock, AlternateCorrBlock, bilinear_sampler, coords_grid, upflow8
+from scipy import interpolate
 
 try:
     autocast = torch.cuda.amp.autocast
@@ -266,8 +266,10 @@ class BasicVSRNet(nn.Module):
 
             # DFT feature extractor
             if self.with_dft_feature_extractor:
-                dft_feature = self.dft_feature_extractor(lr_curr)  # [b, c, h, w]
-                feat_prop += dft_feature
+                dft_feature = self.dft_feature_extractor(lr_curr)  # [b, mid_channels, h, w]
+                feat_prop = torch.cat((dft_feature, feat_prop), dim=1)  # [b, 2 * mid_channels, h, w]
+                # feat_prop += dft_feature
+                feat_prop = self.lrelu(self.fusion(feat_prop))
 
             out = self.lrelu(self.upsample1(feat_prop))
             out = self.lrelu(self.upsample2(out))
