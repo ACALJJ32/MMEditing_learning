@@ -1,3 +1,4 @@
+from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -99,7 +100,10 @@ class BasicVSRNet(nn.Module):
 
         # DFT feature extractor
         self.with_dft_feature_extractor = with_dft
-        self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=10)
+        self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=20)
+
+        self.dft_fusion_backward = nn.Conv2d(2 * mid_channels + 3, mid_channels + 3, 3, 1, 1, bias=True)
+        self.dft_fusion_forward = nn.Conv2d(3 * mid_channels + 3, 2 * mid_channels + 3, 3, 1, 1, bias=True)
 
     def spatial_padding(self, lrs):
         """ Apply pdding spatially.
@@ -224,6 +228,9 @@ class BasicVSRNet(nn.Module):
         flows_forward, flows_backward = self.compute_flow(lrs)
         feats_refill = self.compute_refill_features(lrs, keyframe_idx)
 
+        # compute dft feature
+        dft_features = [self.dft_feature_extractor(lrs[:, i, :, :, :]) for i in range(t)]
+
         # backward-time propgation
         outputs = []
         feat_prop = lrs.new_zeros(n, self.mid_channels, h, w)
@@ -237,13 +244,19 @@ class BasicVSRNet(nn.Module):
                 feat_prop = self.backward_fusion(feat_prop)  # [b, mid_channels, h, w]
 
             feat_prop = torch.cat([lr_curr, feat_prop], dim=1) # [b, mid_channel + 3, h, w]
-            feat_prop = self.backward_resblocks(feat_prop)
 
             # DFT feature extractor
             if self.with_dft_feature_extractor:
-                dft_feature = self.dft_feature_extractor(lr_curr)  # [b, mid_channels, h, w]
-                feat_prop += dft_feature            
+                dft_feature = dft_features[i]  # [b, mid_channels, h, w]
+                
+                feat_prop = torch.cat((dft_feature, feat_prop), dim=1)  # [b, 2 * mid_channles + 3, h, w]
+                feat_prop = self.lrelu(self.dft_fusion_backward(feat_prop))
+                
+            feat_prop = self.backward_resblocks(feat_prop)
 
+            if self.with_dft_feature_extractor:
+                feat_prop += dft_feature
+                        
             outputs.append(feat_prop)
         outputs = outputs[::-1]
 
@@ -262,15 +275,18 @@ class BasicVSRNet(nn.Module):
                 feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)
                 feat_prop = self.forward_fusion(feat_prop)
 
-            feat_prop = torch.cat([lr_curr, outputs[i], feat_prop], dim=1)
-            feat_prop = self.forward_resblocks(feat_prop)  # [b, mid_channel, h, w]
+            feat_prop = torch.cat([lr_curr, outputs[i], feat_prop], dim=1)  # [b, 2 * mid_channels + 3, h, w]
 
             # DFT feature extractor
             if self.with_dft_feature_extractor:
-                dft_feature = self.dft_feature_extractor(lr_curr)  # [b, mid_channels, h, w]
-                # feat_prop = torch.cat((dft_feature, feat_prop), dim=1)  # [b, 2 * mid_channels, h, w]
+                dft_feature = dft_features[i]
+                feat_prop = torch.cat((dft_feature, feat_prop), dim=1)
+                feat_prop = self.lrelu(self.dft_fusion_forward(feat_prop))
+
+            feat_prop = self.forward_resblocks(feat_prop)  # [b, mid_channel, h, w]
+
+            if self.with_dft_feature_extractor:
                 feat_prop += dft_feature
-                # feat_prop = self.lrelu(self.fusion(feat_prop))
 
             out = self.lrelu(self.upsample1(feat_prop))
             out = self.lrelu(self.upsample2(out))
@@ -1008,17 +1024,5 @@ class DftFeatureExtractor(nn.Module):
         dft_feature = self.feature_extractor(dft_feature)
 
         dft_feature = self.lrelu(self.conv_last(dft_feature))
-
-        ################################ In pixel level ##################################
-        # dft_feature = self.get_dft_feature(lr)
-        # dft_feature = dft_feature.cuda() # [b, in_channel * 2, h, w]
-            
-        # dft_feature_first = self.lrelu(self.conv_first(dft_feature))
-        # dft_feature_gt = self.main(dft_feature_first)  # [b, mid_channels, h, w]
-
-        # dft_feature_gt = self.lrelu(self.conv_last(dft_feature_gt))
-        
-        # Feature level
-        ##################################################################################
 
         return dft_feature
