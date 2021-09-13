@@ -100,7 +100,7 @@ class BasicVSRNet(nn.Module):
 
         # DFT feature extractor
         self.with_dft_feature_extractor = with_dft
-        self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=20)
+        self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=10)
 
         self.dft_fusion_backward = nn.Conv2d(2 * mid_channels + 3, mid_channels + 3, 3, 1, 1, bias=True)
         self.dft_fusion_forward = nn.Conv2d(3 * mid_channels + 3, 2 * mid_channels + 3, 3, 1, 1, bias=True)
@@ -253,9 +253,6 @@ class BasicVSRNet(nn.Module):
                 feat_prop = self.lrelu(self.dft_fusion_backward(feat_prop))
                 
             feat_prop = self.backward_resblocks(feat_prop)
-
-            if self.with_dft_feature_extractor:
-                feat_prop += dft_feature
                         
             outputs.append(feat_prop)
         outputs = outputs[::-1]
@@ -284,9 +281,6 @@ class BasicVSRNet(nn.Module):
                 feat_prop = self.lrelu(self.dft_fusion_forward(feat_prop))
 
             feat_prop = self.forward_resblocks(feat_prop)  # [b, mid_channel, h, w]
-
-            if self.with_dft_feature_extractor:
-                feat_prop += dft_feature
 
             out = self.lrelu(self.upsample1(feat_prop))
             out = self.lrelu(self.upsample2(out))
@@ -746,7 +740,7 @@ class RAFTModule(nn.Module):
         return up_flow.reshape(N, 2, 8*H, 8*W)
 
 
-    def forward(self, image1, image2, iters=12, flow_init=None, upsample=True, test_mode=False):
+    def forward(self, image1, image2, iters=12, flow_init=None, upsample=True):
         """ Estimate optical flow between pair of frames """
 
         image1 = 2 * (image1 / 255.0) - 1.0
@@ -800,9 +794,6 @@ class RAFTModule(nn.Module):
                 flow_up = self.upsample_flow(coords1 - coords0, up_mask)
             
             flow_predictions.append(flow_up)
-
-        if test_mode:
-            return coords1 - coords0, flow_up
             
         return flow_predictions
 
