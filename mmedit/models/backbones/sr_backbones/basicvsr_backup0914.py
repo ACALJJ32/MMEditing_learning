@@ -947,6 +947,73 @@ class DftFeatureExtractor(nn.Module):
         
         self.modulation = nn.Sequential(*modulations)
         
+    def get_amplitude(self, lr_feature):
+        assert isinstance(lr_feature, np.ndarray), (
+            print("lr_feature must be np.ndarray!")
+        )
+
+        magnitude_spectrum_zeroOne = np.zeros_like(lr_feature)
+
+        for i in range(3):
+            lr_feature_gray = lr_feature[...,i]
+            lr_feature_gray = cv2.normalize(lr_feature_gray, None, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+
+            dft_feature = cv2.dft(np.float32(lr_feature_gray), flags=cv2.DFT_COMPLEX_OUTPUT)
+            dft_feature_shift = np.fft.fftshift(dft_feature)
+
+            magnitude_spectrum = cv2.magnitude(dft_feature_shift[..., 0], dft_feature_shift[..., 1])
+            magnitude_spectrum_zeroOne[..., i] = cv2.normalize(magnitude_spectrum, None, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+
+        return magnitude_spectrum_zeroOne
+    
+    def get_phase(self, lr_feature):
+        assert isinstance(lr_feature, np.ndarray), (
+            print("lr_feature must be np.ndarray!")
+        )
+
+        phase_feature_zeroOne = np.zeros_like(lr_feature)
+
+        for i in range(3):
+            lr_feature_gray = lr_feature[..., i]
+            lr_feature_gray = cv2.normalize(lr_feature_gray, None, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+
+            dft_feature = np.fft.fft2(lr_feature_gray)
+            dft_feature_shift = np.fft.fftshift(dft_feature)
+
+            phase_feature = np.angle(dft_feature_shift)
+            phase_feature_zeroOne[..., i] = cv2.normalize(phase_feature, None, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+
+        return phase_feature_zeroOne
+
+    def get_dft_feature(self, lr):
+
+        assert isinstance(lr, torch.Tensor), (
+            print("lr must be Torch.Tensor!")
+        )
+
+        b, c, h, w = lr.size()
+        dft_feature = torch.zeros((b, 2 * c, h, w))
+
+        for i in range(b):
+            lr_np = lr[i, ...].clone().detach().cpu().permute(1,2,0).numpy()  # shape: [h, w, c]
+
+            magnitude_spectrum_zeroOne = self.get_amplitude(lr_np)  # [h, w]
+            phase_feature_zeroOne = self.get_phase(lr_np)  # [h, w]
+
+            magnitude_spectrum_zeroOne = torch.from_numpy(magnitude_spectrum_zeroOne).permute(2,0,1)
+            phase_feature_zeroOne = torch.from_numpy(phase_feature_zeroOne).permute(2,0,1)
+
+            dft_feature[i, ...] = torch.cat((magnitude_spectrum_zeroOne, phase_feature_zeroOne), dim=0).cuda()
+            
+        return dft_feature
+
+    def get_amplitude_map(self,fft):
+        assert isinstance(fft, torch.Tensor), (
+            print('Input must be tensor.')
+        )
+
+        n, h, w = fft.size()
+
     def forward(self, lr):
         """
         Args
