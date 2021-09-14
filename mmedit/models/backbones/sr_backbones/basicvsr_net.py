@@ -100,7 +100,7 @@ class BasicVSRNet(nn.Module):
 
         # DFT feature extractor
         self.with_dft_feature_extractor = with_dft
-        self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=10)
+        self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=10, with_gauss=True)
 
         self.dft_fusion_backward = nn.Conv2d(2 * mid_channels + 3, mid_channels + 3, 3, 1, 1, bias=True)
         self.dft_fusion_forward = nn.Conv2d(3 * mid_channels + 3, 2 * mid_channels + 3, 3, 1, 1, bias=True)
@@ -248,9 +248,8 @@ class BasicVSRNet(nn.Module):
             # DFT feature extractor
             if self.with_dft_feature_extractor:
                 dft_feature = dft_features[i]  # [b, mid_channels, h, w]
-                
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)  # [b, 2 * mid_channles + 3, h, w]
-                feat_prop = self.lrelu(self.dft_fusion_backward(feat_prop))
+                feat_prop = self.dft_fusion_backward(feat_prop)
                 
             feat_prop = self.backward_resblocks(feat_prop)
                         
@@ -278,7 +277,7 @@ class BasicVSRNet(nn.Module):
             if self.with_dft_feature_extractor:
                 dft_feature = dft_features[i]
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)
-                feat_prop = self.lrelu(self.dft_fusion_forward(feat_prop))
+                feat_prop = self.dft_fusion_forward(feat_prop)
 
             feat_prop = self.forward_resblocks(feat_prop)  # [b, mid_channel, h, w]
 
@@ -904,7 +903,7 @@ class FastHomographyAlign(nn.Module):
         return x
 
 class DftFeatureExtractor(nn.Module):
-    def __init__(self, mid_channels=64, num_blocks=10):
+    def __init__(self, mid_channels=64, num_blocks=20, with_gauss=False):
         super().__init__()
         self.conv_first = nn.Conv2d(3, mid_channels, 3, 1, 1, bias=True)
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
@@ -924,6 +923,9 @@ class DftFeatureExtractor(nn.Module):
         self.feature_extractor = nn.Sequential(*feature_extractor)
 
         self.conv_last = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=True)
+
+        # Gauss 
+        self.with_gauss = with_gauss
 
     def get_amplitude(self, lr_feature):
         assert isinstance(lr_feature, np.ndarray), (
@@ -1004,16 +1006,22 @@ class DftFeatureExtractor(nn.Module):
             print("lr must be Torch.Tensor!")
         )
 
-        x = self.lrelu(self.conv_first(lr))  # [b, mid_channels, h, w]
+        b, c, h, w = lr.size()
+
+        x = self.conv_first(lr) # [b, mid_channels, h, w]
         x = self.main(x)   # [b, mid_channels, h, w]
 
-        # B = torch.randn(h, w)
-        x_proj = (2 * math.pi * x)
+        if self.with_gauss:
+            B = torch.randn((w,h)).cuda()
+            x_proj = torch.matmul(B, x)
+        else:
+            x_proj = (2 * math.pi * x)
+
         dft_feature = torch.cat((torch.sin(x_proj), torch.cos(x_proj)),dim=1)  # [b, 2 * mid_channels, h, w]
 
-        dft_feature = self.lrelu(self.conv_middle(dft_feature))
+        dft_feature = self.conv_middle(dft_feature)
         dft_feature = self.feature_extractor(dft_feature)
 
-        dft_feature = self.lrelu(self.conv_last(dft_feature))
+        dft_feature = self.conv_last(dft_feature)
 
         return dft_feature
