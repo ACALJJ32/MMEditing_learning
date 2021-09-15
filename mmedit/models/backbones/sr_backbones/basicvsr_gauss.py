@@ -31,7 +31,7 @@ except:
 
 
 @BACKBONES.register_module()
-class BasicVSRNet(nn.Module):
+class BasicVSRGaussModulation(nn.Module):
     """BasicVSR network structure for video super-resolution.
 
     Support only x4 upsampling.
@@ -66,6 +66,7 @@ class BasicVSRNet(nn.Module):
 
         # optical flow network for feature alignment
         self.spynet = SPyNet(pretrained=spynet_pretrained)
+        self.raftnet = RAFTNet()
 
         # information-refill
         self.edvr = EDVRFeatureExtractor(
@@ -198,6 +199,23 @@ class BasicVSRNet(nn.Module):
             flows_forward = self.spynet(lrs_2, lrs_1).view(n, t - 1, 2, h, w)
 
         return flows_forward, flows_backward
+    
+    def compute_flow_with_raft(self, lrs):
+        """Compute optical flow using RAFTNet for feature warping.
+
+        Args:
+            lrs (tensor): Input LR images with shape (n, t, c, h, w)
+
+        Return:
+            tuple(Tensor): Optical flow. 'flows_forward' corresponds to the
+                flows used for forward-time propagation (current to previous).
+                'flows_backward' corresponds to the flows used for
+                backward-time propagation (current to next).
+        """
+        n, t, c, h, w = lrs.size()
+        lrs_1 = lrs[:, :-1, :, :, :].reshape(-1, c, h, w)
+        lrs_2 = lrs[:, 1:, :, :, :].reshape(-1, c, h, w)
+
 
     def forward(self, lrs):
         """Forward function for BasicVSR.
@@ -391,6 +409,7 @@ class SPyNet(nn.Module):
         Args:
             ref (Tensor): Reference image with shape of (n, 3, h, w).
             supp (Tensor): Supporting image with shape of (n, 3, h, w).
+            ref  <== supp
 
         Returns:
             Tensor: Estimated optical flow: (n, 2, h, w).
@@ -439,8 +458,8 @@ class SPyNet(nn.Module):
                         flow_up.permute(0, 2, 3, 1),
                         padding_mode='border'), flow_up
                 ], 1))
-
-        return flow
+        
+        return flow  # [2 * (t-1), 2, 64, 64]
 
     def forward(self, ref, supp):
         """Forward function of SPyNet.
@@ -460,8 +479,8 @@ class SPyNet(nn.Module):
         w_up = w if (w % 32) == 0 else 32 * (w // 32 + 1)
         h_up = h if (h % 32) == 0 else 32 * (h // 32 + 1)
         ref = F.interpolate(
-            input=ref, size=(h_up, w_up), mode='bilinear', align_corners=False)
-        supp = F.interpolate(
+            input=ref, size=(h_up, w_up), mode='bilinear', align_corners=False)  # ref : [2 * (t-1), c, h, w]
+        supp = F.interpolate(                                # supp : [2 * (t-1), c, h, w]
             input=supp,
             size=(h_up, w_up),
             mode='bilinear',
@@ -478,7 +497,7 @@ class SPyNet(nn.Module):
         flow[:, 0, :, :] *= float(w) / float(w_up)
         flow[:, 1, :, :] *= float(h) / float(h_up)
 
-        return flow
+        return flow  # [2 * (t-1), 2, h, w]
 
 class SPyNetBasicModule(nn.Module):
     """Basic Module for SPyNet.
@@ -680,44 +699,43 @@ class EDVRFeatureExtractor(nn.Module):
 
         return feat
 
-class RAFTModule(nn.Module):
-    def __init__(self, args):
-        super(RAFTModule, self).__init__()
-        self.args = args
+class RAFTNet(nn.Module):
+    def __init__(self, pretrained, small = True, dropout = 0, alternate_corr=False, mixed_precision=True):
+        super(RAFTNet, self).__init__()
 
-        if args.small:
-            self.hidden_dim = hdim = 96
-            self.context_dim = cdim = 64
-            args.corr_levels = 4
-            args.corr_radius = 3
+        if small:
+            self.hidden_dim = 96
+            self.context_dim = 64
+            self.corr_levels = 4
+            self.corr_radius = 3
         
         else:
-            self.hidden_dim = hdim = 128
-            self.context_dim = cdim = 128
-            args.corr_levels = 4
-            args.corr_radius = 4
+            self.hidden_dim = 128
+            self.context_dim = 128
+            self.corr_levels = 4
+            self.corr_radius = 4
 
-        if 'dropout' not in self.args:
-            self.args.dropout = 0
+        
+        self.dropout = dropout
+        self.alternate_corr = alternate_corr
 
-        if 'alternate_corr' not in self.args:
-            self.args.alternate_corr = False
+        self.mixed_precision = mixed_precision
 
         # feature network, context network, and update block
-        if args.small:
-            self.fnet = SmallEncoder(output_dim=128, norm_fn='instance', dropout=args.dropout)        
-            self.cnet = SmallEncoder(output_dim=hdim+cdim, norm_fn='none', dropout=args.dropout)
-            self.update_block = SmallUpdateBlock(self.args, hidden_dim=hdim)
+        if small:
+            self.fnet = SmallEncoder(output_dim=128, norm_fn='instance', dropout=self.dropout)        
+            self.cnet = SmallEncoder(output_dim=self.hidden_dim + self.context_dim, norm_fn='none', dropout=self.dropout)
+            self.update_block = SmallUpdateBlock(self.corr_levels, self.corr_radius, hidden_dim=self.hidden_dim)
 
         else:
-            self.fnet = BasicEncoder(output_dim=256, norm_fn='instance', dropout=args.dropout)        
-            self.cnet = BasicEncoder(output_dim=hdim+cdim, norm_fn='batch', dropout=args.dropout)
-            self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim)
+            self.fnet = BasicEncoder(output_dim=256, norm_fn='instance', dropout=self.dropout)        
+            self.cnet = BasicEncoder(output_dim=self.hidden_dim + self.context_dim, norm_fn='batch', dropout=self.dropout)
+            self.update_block = BasicUpdateBlock(self.corr_levels, self.corr_radius, hidden_dim=self.hidden_dim)
 
-    def freeze_bn(self):
-        for m in self.modules():
-            if isinstance(m, nn.BatchNorm2d):
-                m.eval()
+    # def freeze_bn(self):
+    #     for m in self.modules():
+    #         if isinstance(m, nn.BatchNorm2d):
+    #             m.eval()
 
     def initialize_flow(self, img):
         """ Flow is represented as difference between two coordinate grids flow = coords1 - coords0"""
@@ -755,18 +773,18 @@ class RAFTModule(nn.Module):
         cdim = self.context_dim
 
         # run the feature network
-        with autocast(enabled=self.args.mixed_precision):
+        with autocast(enabled=self.mixed_precision):
             fmap1, fmap2 = self.fnet([image1, image2])        
         
         fmap1 = fmap1.float()
         fmap2 = fmap2.float()
-        if self.args.alternate_corr:
-            corr_fn = AlternateCorrBlock(fmap1, fmap2, radius=self.args.corr_radius)
+        if self.alternate_corr:
+            corr_fn = AlternateCorrBlock(fmap1, fmap2, radius=self.corr_radius)
         else:
-            corr_fn = CorrBlock(fmap1, fmap2, radius=self.args.corr_radius)
+            corr_fn = CorrBlock(fmap1, fmap2, radius=self.corr_radius)
 
         # run the context network
-        with autocast(enabled=self.args.mixed_precision):
+        with autocast(enabled=self.mixed_precision):
             cnet = self.cnet(image1)
             net, inp = torch.split(cnet, [hdim, cdim], dim=1)
             net = torch.tanh(net)

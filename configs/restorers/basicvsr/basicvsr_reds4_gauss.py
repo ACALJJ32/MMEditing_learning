@@ -1,10 +1,10 @@
-exp_name = 'basicvsr_reds4_gauss_test'
+exp_name = 'basicvsr_reds4_gauss_modulate'
 
 # model settings
 model = dict(
     type='BasicVSR',
     generator=dict(
-        type='BasicVSRNet',
+        type='BasicVSRGaussModulation',
         mid_channels=64,
         num_blocks=30,
         keyframe_stride=1,
