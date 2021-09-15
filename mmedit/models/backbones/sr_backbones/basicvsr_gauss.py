@@ -66,7 +66,7 @@ class BasicVSRGaussModulation(nn.Module):
 
         # optical flow network for feature alignment
         self.spynet = SPyNet(pretrained=spynet_pretrained)
-        self.raftnet = RAFTNet()
+        self.raftnet = RAFTNet(pretrained='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/VSR/mmediting_cuc/weight/raft/raft-small.pth')
 
         # information-refill
         self.edvr = EDVRFeatureExtractor(
@@ -216,6 +216,15 @@ class BasicVSRGaussModulation(nn.Module):
         lrs_1 = lrs[:, :-1, :, :, :].reshape(-1, c, h, w)
         lrs_2 = lrs[:, 1:, :, :, :].reshape(-1, c, h, w)
 
+        flows_backward = self.raftnet(lrs_1, lrs_2).view(n, t - 1, 2, h, w)
+
+        if self.is_mirror_extended:  # flows_forward = flows_backward.flip(1)
+            flows_forward = None
+        else:
+            flows_forward = self.spynet(lrs_2, lrs_1).view(n, t - 1, 2, h, w)
+
+        return flows_forward, flows_backward
+
 
     def forward(self, lrs):
         """Forward function for BasicVSR.
@@ -245,7 +254,8 @@ class BasicVSRGaussModulation(nn.Module):
             keyframe_idx.append(t - 1)  # the last frame must be a keyframe
 
         # compute optical flow and compute features for information-refill
-        flows_forward, flows_backward = self.compute_flow(lrs)
+        # flows_forward, flows_backward = self.compute_flow(lrs)
+        flows_forward, flows_backward = self.compute_flow_with_raft(lrs)
         feats_refill = self.compute_refill_features(lrs, keyframe_idx)
 
         # compute dft feature
@@ -257,8 +267,9 @@ class BasicVSRGaussModulation(nn.Module):
         for i in range(t - 1, -1, -1):
             lr_curr = lrs[:, i, :, :, :]
             if i < t - 1:  # no warping for the last timestep
-                flow = flows_backward[:, i, :, :, :]
+                flow = flows_backward[:, i, :, :, :]   # [b, 2, h, w]
                 feat_prop = flow_warp(feat_prop, flow.permute(0, 2, 3, 1))
+
             if i in keyframe_idx:
                 feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)  # [b, 2 * mid_channles, h, w]
                 feat_prop = self.backward_fusion(feat_prop)  # [b, mid_channels, h, w]
@@ -731,40 +742,47 @@ class RAFTNet(nn.Module):
             self.fnet = BasicEncoder(output_dim=256, norm_fn='instance', dropout=self.dropout)        
             self.cnet = BasicEncoder(output_dim=self.hidden_dim + self.context_dim, norm_fn='batch', dropout=self.dropout)
             self.update_block = BasicUpdateBlock(self.corr_levels, self.corr_radius, hidden_dim=self.hidden_dim)
-
-    # def freeze_bn(self):
-    #     for m in self.modules():
-    #         if isinstance(m, nn.BatchNorm2d):
-    #             m.eval()
+        
+        if isinstance(pretrained, str):
+            logger = get_root_logger()
+            load_checkpoint(self, pretrained, strict=True, logger=logger)
+        elif pretrained is not None:
+            raise TypeError('[pretrained] should be str or None, '
+                            f'but got {type(pretrained)}.')
 
     def initialize_flow(self, img):
-        """ Flow is represented as difference between two coordinate grids flow = coords1 - coords0"""
-        N, C, H, W = img.shape
-        coords0 = coords_grid(N, H//8, W//8).to(img.device)
-        coords1 = coords_grid(N, H//8, W//8).to(img.device)
+        """ Flow is represented as difference between two coordinate grids flow = coords1 - coords0
+        
+        Args:
+            img (Tensor): Input image sequence with shape (n, t, c, h, w).
+
+        """
+        n, c, h, w = img.size()
+        coords0 = coords_grid(n, h//8, w//8).to(img.device)
+        coords1 = coords_grid(n, h//8, w//8).to(img.device)
 
         # optical flow computed as difference: flow = coords1 - coords0
         return coords0, coords1
 
     def upsample_flow(self, flow, mask):
         """ Upsample flow field [H/8, W/8, 2] -> [H, W, 2] using convex combination """
-        N, _, H, W = flow.shape
-        mask = mask.view(N, 1, 9, 8, 8, H, W)
+        n, _, h, w = flow.size()
+        mask = mask.view(n, 1, 9, 8, 8, h, w)
         mask = torch.softmax(mask, dim=2)
 
         up_flow = F.unfold(8 * flow, [3,3], padding=1)
-        up_flow = up_flow.view(N, 2, 9, 1, 1, H, W)
+        up_flow = up_flow.view(n, 2, 9, 1, 1, h, w)
 
         up_flow = torch.sum(mask * up_flow, dim=2)
         up_flow = up_flow.permute(0, 1, 4, 2, 5, 3)
-        return up_flow.reshape(N, 2, 8*H, 8*W)
+        return up_flow.reshape(n, 2, 8*h, 8*w)
 
 
     def forward(self, image1, image2, iters=12, flow_init=None, upsample=True):
         """ Estimate optical flow between pair of frames """
 
-        image1 = 2 * (image1 / 255.0) - 1.0
-        image2 = 2 * (image2 / 255.0) - 1.0
+        image1 = 2 * image1 - 1.0
+        image2 = 2 * image2 - 1.0
 
         image1 = image1.contiguous()
         image2 = image2.contiguous()
@@ -801,7 +819,7 @@ class RAFTNet(nn.Module):
             corr = corr_fn(coords1) # index correlation volume
 
             flow = coords1 - coords0
-            with autocast(enabled=self.args.mixed_precision):
+            with autocast(enabled=self.mixed_precision):
                 net, up_mask, delta_flow = self.update_block(net, inp, corr, flow)
 
             # F(t+1) = F(t) + \Delta(t)
@@ -815,7 +833,7 @@ class RAFTNet(nn.Module):
             
             flow_predictions.append(flow_up)
             
-        return flow_predictions
+        return flow_predictions[-1]
 
 class FastHomographyAlign(nn.Module):
     def __init__(self, points = 20, with_sift = True):
