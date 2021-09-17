@@ -1,4 +1,4 @@
-exp_name = 'basicvsr_reds4_gauss_modulate'
+exp_name = 'basicvsr_reds4_gauss_raft'
 
 # model settings
 model = dict(

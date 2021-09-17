@@ -221,7 +221,7 @@ class BasicVSRGaussModulation(nn.Module):
         if self.is_mirror_extended:  # flows_forward = flows_backward.flip(1)
             flows_forward = None
         else:
-            flows_forward = self.spynet(lrs_2, lrs_1).view(n, t - 1, 2, h, w)
+            flows_forward = self.raftnet(lrs_2, lrs_1).view(n, t - 1, 2, h, w)
 
         return flows_forward, flows_backward
 
@@ -254,7 +254,7 @@ class BasicVSRGaussModulation(nn.Module):
             keyframe_idx.append(t - 1)  # the last frame must be a keyframe
 
         # compute optical flow and compute features for information-refill
-        # flows_forward, flows_backward = self.compute_flow(lrs)
+        # flows_forward, flows_backward = self.compute_flow(lrs)   
         flows_forward, flows_backward = self.compute_flow_with_raft(lrs)
         feats_refill = self.compute_refill_features(lrs, keyframe_idx)
 
@@ -491,7 +491,7 @@ class SPyNet(nn.Module):
         h_up = h if (h % 32) == 0 else 32 * (h // 32 + 1)
         ref = F.interpolate(
             input=ref, size=(h_up, w_up), mode='bilinear', align_corners=False)  # ref : [2 * (t-1), c, h, w]
-        supp = F.interpolate(                                # supp : [2 * (t-1), c, h, w]
+        supp = F.interpolate(                                                    # supp : [2 * (t-1), c, h, w]
             input=supp,
             size=(h_up, w_up),
             mode='bilinear',
@@ -508,7 +508,7 @@ class SPyNet(nn.Module):
         flow[:, 0, :, :] *= float(w) / float(w_up)
         flow[:, 1, :, :] *= float(h) / float(h_up)
 
-        return flow  # [2 * (t-1), 2, h, w]
+        return flow 
 
 class SPyNetBasicModule(nn.Module):
     """Basic Module for SPyNet.
@@ -711,44 +711,35 @@ class EDVRFeatureExtractor(nn.Module):
         return feat
 
 class RAFTNet(nn.Module):
-    def __init__(self, pretrained, small = True, dropout = 0, alternate_corr=False, mixed_precision=True):
+    def __init__(self, pretrained, dropout = 0, mixed_precision=True):
         super(RAFTNet, self).__init__()
 
-        if small:
-            self.hidden_dim = 96
-            self.context_dim = 64
-            self.corr_levels = 4
-            self.corr_radius = 3
-        
-        else:
-            self.hidden_dim = 128
-            self.context_dim = 128
-            self.corr_levels = 4
-            self.corr_radius = 4
+        self.hidden_dim = 96
+        self.context_dim = 64
+        self.corr_levels = 4
+        self.corr_radius = 3
 
-        
         self.dropout = dropout
-        self.alternate_corr = alternate_corr
-
         self.mixed_precision = mixed_precision
 
         # feature network, context network, and update block
-        if small:
-            self.fnet = SmallEncoder(output_dim=128, norm_fn='instance', dropout=self.dropout)        
-            self.cnet = SmallEncoder(output_dim=self.hidden_dim + self.context_dim, norm_fn='none', dropout=self.dropout)
-            self.update_block = SmallUpdateBlock(self.corr_levels, self.corr_radius, hidden_dim=self.hidden_dim)
+        self.fnet = SmallEncoder(output_dim=128, norm_fn='instance', dropout=self.dropout)        
+        self.cnet = SmallEncoder(output_dim=self.hidden_dim + self.context_dim, norm_fn='none', dropout=self.dropout)
+        self.update_block = SmallUpdateBlock(self.corr_levels, self.corr_radius, hidden_dim=self.hidden_dim)
 
-        else:
-            self.fnet = BasicEncoder(output_dim=256, norm_fn='instance', dropout=self.dropout)        
-            self.cnet = BasicEncoder(output_dim=self.hidden_dim + self.context_dim, norm_fn='batch', dropout=self.dropout)
-            self.update_block = BasicUpdateBlock(self.corr_levels, self.corr_radius, hidden_dim=self.hidden_dim)
-        
         if isinstance(pretrained, str):
             logger = get_root_logger()
             load_checkpoint(self, pretrained, strict=True, logger=logger)
         elif pretrained is not None:
             raise TypeError('[pretrained] should be str or None, '
                             f'but got {type(pretrained)}.')
+        
+        self.register_buffer(
+            'mean',
+            torch.Tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer(
+            'std',
+            torch.Tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
     def initialize_flow(self, img):
         """ Flow is represented as difference between two coordinate grids flow = coords1 - coords0
@@ -757,13 +748,13 @@ class RAFTNet(nn.Module):
             img (Tensor): Input image sequence with shape (n, t, c, h, w).
 
         """
-        n, c, h, w = img.size()
+        n, c, h, w = img.shape
         coords0 = coords_grid(n, h//8, w//8).to(img.device)
         coords1 = coords_grid(n, h//8, w//8).to(img.device)
 
         # optical flow computed as difference: flow = coords1 - coords0
         return coords0, coords1
-
+    
     def upsample_flow(self, flow, mask):
         """ Upsample flow field [H/8, W/8, 2] -> [H, W, 2] using convex combination """
         n, _, h, w = flow.size()
@@ -777,46 +768,53 @@ class RAFTNet(nn.Module):
         up_flow = up_flow.permute(0, 1, 4, 2, 5, 3)
         return up_flow.reshape(n, 2, 8*h, 8*w)
 
+    def compute_flow(self, ref, supp, iters=12):
+        """Compute flow from ref to supp.
 
-    def forward(self, image1, image2, iters=12, flow_init=None, upsample=True):
-        """ Estimate optical flow between pair of frames """
+        Note that in this function, the images are already resized to a
+        multiple of 32.
 
-        image1 = 2 * image1 - 1.0
-        image2 = 2 * image2 - 1.0
+        Args:
+            ref (Tensor): Reference image with shape of (n, 3, h, w).
+            supp (Tensor): Supporting image with shape of (n, 3, h, w).
+            ref  <== supp
 
-        image1 = image1.contiguous()
-        image2 = image2.contiguous()
+        Returns:
+            Tensor: Estimated optical flow: (n, 2, h, w).
+        """
+
+        n, _, h, w = ref.size()
+
+        # normalize the input images
+        ref = (ref - self.mean) / self.std
+        supp = (supp - self.mean) / self.std
+
 
         hdim = self.hidden_dim
         cdim = self.context_dim
 
         # run the feature network
         with autocast(enabled=self.mixed_precision):
-            fmap1, fmap2 = self.fnet([image1, image2])        
+            fmap1, fmap2 = self.fnet([supp, ref])        
         
-        fmap1 = fmap1.float()
+        fmap1 = fmap1.float()   
         fmap2 = fmap2.float()
-        if self.alternate_corr:
-            corr_fn = AlternateCorrBlock(fmap1, fmap2, radius=self.corr_radius)
-        else:
-            corr_fn = CorrBlock(fmap1, fmap2, radius=self.corr_radius)
+
+        corr_fn = CorrBlock(fmap1, fmap2, radius=self.corr_radius)
 
         # run the context network
         with autocast(enabled=self.mixed_precision):
-            cnet = self.cnet(image1)
+            cnet = self.cnet(supp)
             net, inp = torch.split(cnet, [hdim, cdim], dim=1)
             net = torch.tanh(net)
             inp = torch.relu(inp)
 
-        coords0, coords1 = self.initialize_flow(image1)
-
-        if flow_init is not None:
-            coords1 = coords1 + flow_init
+        coords0, coords1 = self.initialize_flow(supp) 
 
         flow_predictions = []
         for itr in range(iters):
             coords1 = coords1.detach()
-            corr = corr_fn(coords1) # index correlation volume
+            corr = corr_fn(coords1) # index correlation volume  
 
             flow = coords1 - coords0
             with autocast(enabled=self.mixed_precision):
@@ -832,8 +830,39 @@ class RAFTNet(nn.Module):
                 flow_up = self.upsample_flow(coords1 - coords0, up_mask)
             
             flow_predictions.append(flow_up)
-            
-        return flow_predictions[-1]
+        
+        flow_up = flow_predictions[-1]
+
+        return flow_up
+
+    def forward(self, ref, supp):
+        """ Estimate optical flow between pair of frames """
+
+        t, c, h, w = ref.size()
+
+        # upsize to a multiple of 32
+        w_up = w if (w % 32) == 0 else 32 * (w // 32 + 1)
+        h_up = h if (h % 32) == 0 else 32 * (h // 32 + 1)
+
+        ref = F.interpolate(
+            input=ref, size=(h_up, w_up), mode='bilinear', align_corners=False)  
+        
+        supp = F.interpolate(
+            input=supp, size=(h_up, w_up), mode='bilinear', align_corners=False)
+        
+        flow_up = self.compute_flow(ref, supp)  # [2 * (t-1), 2, h, w]
+
+        flow_up = F.interpolate(
+            input=flow_up,
+            size=(h,w),
+            mode="bilinear",
+            align_corners=False)
+        
+        # adjust the flow values
+        flow_up[:, 0, :, :] *= float(w) / float(w_up)
+        flow_up[:, 1, :, :] *= float(h) / float(h_up)
+
+        return flow_up
 
 class FastHomographyAlign(nn.Module):
     def __init__(self, points = 20, with_sift = True):
