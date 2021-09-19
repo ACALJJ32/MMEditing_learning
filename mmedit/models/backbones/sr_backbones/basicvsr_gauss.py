@@ -225,7 +225,6 @@ class BasicVSRGaussModulation(nn.Module):
 
         return flows_forward, flows_backward
 
-
     def forward(self, lrs):
         """Forward function for BasicVSR.
 
@@ -255,11 +254,12 @@ class BasicVSRGaussModulation(nn.Module):
 
         # compute optical flow and compute features for information-refill
         # flows_forward, flows_backward = self.compute_flow(lrs)   
-        flows_forward, flows_backward = self.compute_flow_with_raft(lrs)
-        feats_refill = self.compute_refill_features(lrs, keyframe_idx)
+        flows_forward, flows_backward = self.compute_flow_with_raft(lrs)  
+        feats_refill = self.compute_refill_features(lrs, keyframe_idx)   # dict; feats_refill[0] shape: [b, mid_channels, h, w]
 
         # compute dft feature
-        dft_features = [self.dft_feature_extractor(lrs[:, i, :, :, :]) for i in range(t)]
+        # dft_features = [self.dft_feature_extractor(lrs[:, i, :, :, :]) for i in range(t)]
+        dft_features = [self.dft_feature_extractor(feats_refill[i]) for i in range(t)]
 
         # backward-time propgation
         outputs = []
@@ -973,7 +973,7 @@ class FastHomographyAlign(nn.Module):
 class DftFeatureExtractor(nn.Module):
     def __init__(self, mid_channels=64, num_blocks=20, with_gauss=False, guass_key = 1.0):
         super().__init__()
-        self.conv_first = nn.Conv2d(3, mid_channels, 3, 1, 1, bias=True)
+        self.conv_first = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=True)
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
 
         main = []
@@ -982,7 +982,7 @@ class DftFeatureExtractor(nn.Module):
                 ResidualBlockNoBN, 6, mid_channels=mid_channels))
         self.main = nn.Sequential(*main)
 
-        self.conv_middle = nn.Conv2d(2*mid_channels, mid_channels, 3, 1, 1, bias=True)
+        self.conv_middle = nn.Conv2d(2 * mid_channels, mid_channels, 3, 1, 1, bias=True)
 
         feature_extractor = []
         feature_extractor.append(
@@ -1030,11 +1030,11 @@ class DftFeatureExtractor(nn.Module):
         x_proj = (2 * math.pi * x)
 
         if self.with_gauss:
-            B = torch.randn((h,h)).cuda()
+            B = torch.randn((h,h)).to(lr.device)
 
             # modulate the gauss mat
             gauss_key =  torch.ones((b,1,h,h)) * self.guass_key
-            gauss_key = gauss_key.cuda()
+            gauss_key = gauss_key.to(lr.device)
             gauss_key = self.modulation(gauss_key)
             B = B * gauss_key
 
