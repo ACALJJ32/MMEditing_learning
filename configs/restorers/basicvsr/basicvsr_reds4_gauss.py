@@ -1,4 +1,4 @@
-exp_name = 'basicvsr_reds4_gauss_raft'
+exp_name = 'basicvsr_reds4_gauss_raft_attention'
 
 # model settings
 model = dict(
@@ -9,11 +9,10 @@ model = dict(
         num_blocks=30,
         keyframe_stride=1,
         padding=2,
-        spynet_pretrained='https://download.openmmlab.com/mmediting/restorers/'
-        'basicvsr/spynet_20210409-c6c1bd09.pth',
+        raftnet_pretrained='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/'
+        'ljj/VSR/mmediting_cuc/weight/raft/raft-small.pth',
         edvr_pretrained='https://download.openmmlab.com/mmediting/restorers/'
         'iconvsr/edvrm_reds_20210413-3867262f.pth',
-        with_homography_align=False,
         with_dft=True),
     pixel_loss=dict(type='MultiLoss', loss_weight=1.0, reduction='mean'))
 # model training and testing settings
@@ -142,11 +141,11 @@ lr_config = dict(
     restart_weights=[1],
     min_lr=1e-7)
 
-checkpoint_config = dict(interval=5000, save_optimizer=True, by_epoch=False)
+checkpoint_config = dict(interval=100, save_optimizer=True, by_epoch=False)
 # remove gpu_collect=True in non distributed training
-evaluation = dict(interval=5000, save_image=False, gpu_collect=True)
+evaluation = dict(interval=100, save_image=False, gpu_collect=True)
 log_config = dict(
-    interval=100,
+    interval=5,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=False),
         # dict(type='TensorboardLoggerHook'),

@@ -53,9 +53,8 @@ class BasicVSRGaussModulation(nn.Module):
                  num_blocks=30,
                  keyframe_stride=5,
                  padding=2,
-                 spynet_pretrained=None,
+                 raftnet_pretrained=None,
                  edvr_pretrained=None,
-                 with_homography_align=False,
                  with_dft=False):
 
         super().__init__()
@@ -65,15 +64,13 @@ class BasicVSRGaussModulation(nn.Module):
         self.keyframe_stride = keyframe_stride
 
         # optical flow network for feature alignment
-        self.spynet = SPyNet(pretrained=spynet_pretrained)
-        self.raftnet = RAFTNet(pretrained='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/VSR/mmediting_cuc/weight/raft/raft-small.pth')
+        self.raftnet = RAFTNet(pretrained=raftnet_pretrained)
 
         # information-refill
         self.edvr = EDVRFeatureExtractor(
             num_frames=padding * 2 + 1,
             center_frame_idx=padding,
-            pretrained=edvr_pretrained,
-            with_homography_align=with_homography_align)
+            pretrained=edvr_pretrained)
         self.backward_fusion = nn.Conv2d(
             2 * mid_channels, mid_channels, 3, 1, 1, bias=True)
         self.forward_fusion = nn.Conv2d(
@@ -170,35 +167,6 @@ class BasicVSRGaussModulation(nn.Module):
         for i in keyframe_idx:
             feats_refill[i] = self.edvr(lrs[:, i:i + num_frames].contiguous())
         return feats_refill
-
-    def compute_flow(self, lrs):
-        """Compute optical flow using SPyNet for feature warping.
-
-        Note that if the input is an mirror-extended sequence, 'flows_forward'
-        is not needed, since it is equal to 'flows_backward.flip(1)'.
-
-        Args:
-            lrs (tensor): Input LR images with shape (n, t, c, h, w)
-
-        Return:
-            tuple(Tensor): Optical flow. 'flows_forward' corresponds to the
-                flows used for forward-time propagation (current to previous).
-                'flows_backward' corresponds to the flows used for
-                backward-time propagation (current to next).
-        """
-
-        n, t, c, h, w = lrs.size()
-        lrs_1 = lrs[:, :-1, :, :, :].reshape(-1, c, h, w)
-        lrs_2 = lrs[:, 1:, :, :, :].reshape(-1, c, h, w)
-
-        flows_backward = self.spynet(lrs_1, lrs_2).view(n, t - 1, 2, h, w)
-
-        if self.is_mirror_extended:  # flows_forward = flows_backward.flip(1)
-            flows_forward = None
-        else:
-            flows_forward = self.spynet(lrs_2, lrs_1).view(n, t - 1, 2, h, w)
-
-        return flows_forward, flows_backward
     
     def compute_flow_with_raft(self, lrs):
         """Compute optical flow using RAFTNet for feature warping.
@@ -252,8 +220,7 @@ class BasicVSRGaussModulation(nn.Module):
         if keyframe_idx[-1] != t - 1:
             keyframe_idx.append(t - 1)  # the last frame must be a keyframe
 
-        # compute optical flow and compute features for information-refill
-        # flows_forward, flows_backward = self.compute_flow(lrs)   
+        # compute optical flow and compute features for information-refill  
         flows_forward, flows_backward = self.compute_flow_with_raft(lrs)  
         feats_refill = self.compute_refill_features(lrs, keyframe_idx)   # dict; feats_refill[0] shape: [b, mid_channels, h, w]
 
@@ -270,6 +237,10 @@ class BasicVSRGaussModulation(nn.Module):
                 flow = flows_backward[:, i, :, :, :]   # [b, 2, h, w]
                 feat_prop = flow_warp(feat_prop, flow.permute(0, 2, 3, 1))
 
+            # Attention implement
+            # print("feat prop shape: ", feat_prop.size())
+            # print("feat_refill shape: ", feats_refill[0].size())
+
             if i in keyframe_idx:
                 feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)  # [b, 2 * mid_channles, h, w]
                 feat_prop = self.backward_fusion(feat_prop)  # [b, mid_channels, h, w]
@@ -280,8 +251,8 @@ class BasicVSRGaussModulation(nn.Module):
             if self.with_dft_feature_extractor:
                 dft_feature = dft_features[i]  # [b, mid_channels, h, w]
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)  # [b, 2 * mid_channles + 3, h, w]
-                feat_prop = self.dft_fusion_backward(feat_prop)
-                
+                feat_prop = self.dft_fusion_backward(feat_prop)  
+             
             feat_prop = self.backward_resblocks(feat_prop)
                         
             outputs.append(feat_prop)
@@ -309,8 +280,6 @@ class BasicVSRGaussModulation(nn.Module):
                 dft_feature = dft_features[i]
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)
                 feat_prop = self.dft_fusion_forward(feat_prop)
-
-                feat_prop += dft_feature
 
             feat_prop = self.forward_resblocks(feat_prop)  # [b, mid_channel, h, w]
 
@@ -377,204 +346,7 @@ class ResidualBlocksWithInputConv(nn.Module):
             Tensor: Output feature with shape (n, out_channels, h, w)
         """
         return self.main(feat)
-
-class SPyNet(nn.Module):
-    """SPyNet network structure.
-
-    The difference to the SPyNet in [tof.py] is that
-        1. more SPyNetBasicModule is used in this version, and
-        2. no batch normalization is used in this version.
-
-    Paper:
-        Optical Flow Estimation using a Spatial Pyramid Network, CVPR, 2017
-
-    Args:
-        pretrained (str): path for pre-trained SPyNet. Default: None.
-    """
-
-    def __init__(self, pretrained):
-        super().__init__()
-
-        self.basic_module = nn.ModuleList(
-            [SPyNetBasicModule() for _ in range(6)])
-
-        if isinstance(pretrained, str):
-            logger = get_root_logger()
-            load_checkpoint(self, pretrained, strict=True, logger=logger)
-        elif pretrained is not None:
-            raise TypeError('[pretrained] should be str or None, '
-                            f'but got {type(pretrained)}.')
-
-        self.register_buffer(
-            'mean',
-            torch.Tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
-        self.register_buffer(
-            'std',
-            torch.Tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
-
-    def compute_flow(self, ref, supp):
-        """Compute flow from ref to supp.
-
-        Note that in this function, the images are already resized to a
-        multiple of 32.
-
-        Args:
-            ref (Tensor): Reference image with shape of (n, 3, h, w).
-            supp (Tensor): Supporting image with shape of (n, 3, h, w).
-            ref  <== supp
-
-        Returns:
-            Tensor: Estimated optical flow: (n, 2, h, w).
-        """
-        n, _, h, w = ref.size()
-
-        # normalize the input images
-        ref = [(ref - self.mean) / self.std]
-        supp = [(supp - self.mean) / self.std]
-
-        # generate downsampled frames
-        for level in range(5):
-            ref.append(
-                F.avg_pool2d(
-                    input=ref[-1],
-                    kernel_size=2,
-                    stride=2,
-                    count_include_pad=False))
-            supp.append(
-                F.avg_pool2d(
-                    input=supp[-1],
-                    kernel_size=2,
-                    stride=2,
-                    count_include_pad=False))
-        ref = ref[::-1]
-        supp = supp[::-1]
-
-        # flow computation
-        flow = ref[0].new_zeros(n, 2, h // 32, w // 32)
-        for level in range(len(ref)):
-            if level == 0:
-                flow_up = flow
-            else:
-                flow_up = F.interpolate(
-                    input=flow,
-                    scale_factor=2,
-                    mode='bilinear',
-                    align_corners=True) * 2.0
-
-            # add the residue to the upsampled flow
-            flow = flow_up + self.basic_module[level](
-                torch.cat([
-                    ref[level],
-                    flow_warp(
-                        supp[level],
-                        flow_up.permute(0, 2, 3, 1),
-                        padding_mode='border'), flow_up
-                ], 1))
-        
-        return flow  # [2 * (t-1), 2, 64, 64]
-
-    def forward(self, ref, supp):
-        """Forward function of SPyNet.
-
-        This function computes the optical flow from ref to supp.
-
-        Args:
-            ref (Tensor): Reference image with shape of (n, 3, h, w).
-            supp (Tensor): Supporting image with shape of (n, 3, h, w).
-
-        Returns:
-            Tensor: Estimated optical flow: (n, 2, h, w).
-        """
-
-        # upsize to a multiple of 32
-        h, w = ref.shape[2:4]
-        w_up = w if (w % 32) == 0 else 32 * (w // 32 + 1)
-        h_up = h if (h % 32) == 0 else 32 * (h // 32 + 1)
-        ref = F.interpolate(
-            input=ref, size=(h_up, w_up), mode='bilinear', align_corners=False)  # ref : [2 * (t-1), c, h, w]
-        supp = F.interpolate(                                                    # supp : [2 * (t-1), c, h, w]
-            input=supp,
-            size=(h_up, w_up),
-            mode='bilinear',
-            align_corners=False)
-
-        # compute flow, and resize back to the original resolution
-        flow = F.interpolate(
-            input=self.compute_flow(ref, supp),
-            size=(h, w),
-            mode='bilinear',
-            align_corners=False)
-
-        # adjust the flow values
-        flow[:, 0, :, :] *= float(w) / float(w_up)
-        flow[:, 1, :, :] *= float(h) / float(h_up)
-
-        return flow 
-
-class SPyNetBasicModule(nn.Module):
-    """Basic Module for SPyNet.
-
-    Paper:
-        Optical Flow Estimation using a Spatial Pyramid Network, CVPR, 2017
-    """
-
-    def __init__(self):
-        super().__init__()
-
-        self.basic_module = nn.Sequential(
-            ConvModule(
-                in_channels=8,
-                out_channels=32,
-                kernel_size=7,
-                stride=1,
-                padding=3,
-                norm_cfg=None,
-                act_cfg=dict(type='ReLU')),
-            ConvModule(
-                in_channels=32,
-                out_channels=64,
-                kernel_size=7,
-                stride=1,
-                padding=3,
-                norm_cfg=None,
-                act_cfg=dict(type='ReLU')),
-            ConvModule(
-                in_channels=64,
-                out_channels=32,
-                kernel_size=7,
-                stride=1,
-                padding=3,
-                norm_cfg=None,
-                act_cfg=dict(type='ReLU')),
-            ConvModule(
-                in_channels=32,
-                out_channels=16,
-                kernel_size=7,
-                stride=1,
-                padding=3,
-                norm_cfg=None,
-                act_cfg=dict(type='ReLU')),
-            ConvModule(
-                in_channels=16,
-                out_channels=2,
-                kernel_size=7,
-                stride=1,
-                padding=3,
-                norm_cfg=None,
-                act_cfg=None))
-
-    def forward(self, tensor_input):
-        """
-        Args:
-            tensor_input (Tensor): Input tensor with shape (b, 8, h, w).
-                8 channels contain:
-                [reference image (3), neighbor image (3), initial flow (2)].
-
-        Returns:
-            Tensor: Refined flow with shape (b, 2, h, w)
-        """
-        return self.basic_module(tensor_input)
-    
+   
 class EDVRFeatureExtractor(nn.Module):
     """EDVR feature extractor for information-refill in IconVSR.
 
@@ -656,10 +428,6 @@ class EDVRFeatureExtractor(nn.Module):
         elif pretrained is not None:
             raise TypeError(f'"pretrained" must be a str or None. '
                             f'But received {type(pretrained)}.')
-        
-        # Homography align
-        self.with_homography_align = with_homography_align
-        self.homography_align = FastHomographyAlign()
 
     def forward(self, x):
         """Forward function for EDVRFeatureExtractor.
@@ -668,10 +436,6 @@ class EDVRFeatureExtractor(nn.Module):
         Returns:
             Tensor: Intermediate feature with shape (n, mid_channels, h, w).
         """
-
-        # Homography align
-        if self.with_homography_align:
-            x = self.homography_align(x)
 
         n, t, c, h, w = x.size()
 
@@ -864,112 +628,6 @@ class RAFTNet(nn.Module):
         flow_up[:, 1, :, :] *= float(h) / float(h_up)
 
         return flow_up
-
-class FastHomographyAlign(nn.Module):
-    def __init__(self, points = 20, with_sift = True):
-        super().__init__()
-
-        # create Matcher object
-        self.matcher = cv2.DescriptorMatcher_create(cv2.DESCRIPTOR_MATCHER_BRUTEFORCE_HAMMING)
-
-        # Init SIFT detector
-        self.with_sift = with_sift
-        self.sift = cv2.xfeatures2d.SIFT_create()
-
-        # at least 10 points
-        self.min_match_count = 25 
-
-        # FLANN matcher; KD tree
-        index_params = dict(algorithm = 1, trees = 5)
-        search_params = dict(checks = 50)
-        self.flann = cv2.FlannBasedMatcher(index_params, search_params)
-
-    def align_frame_sift(self, target, neighbor):
-        """ use sift to match images """
-
-        assert isinstance(target, torch.Tensor) and isinstance(neighbor, torch.Tensor), (
-            print("input target and neighbor must be torch.Tensor !")
-        )
-
-        b, c, h, w = target.size()
-
-        for i in range(b):
-            target_img = target[i,:,:,:].clone().cpu().contiguous().detach().permute(1,2,0)
-            neighbor_img = neighbor[i,:,:,:].clone().cpu().contiguous().detach().permute(1,2,0)
-
-            # get numpy array
-            target_img = target_img.numpy()
-            neighbor_img = neighbor_img.numpy()
-
-            # compute homography and align
-            target_img_gray = cv2.cvtColor(target_img, cv2.COLOR_RGB2GRAY)
-            neighbor_img_gray = cv2.cvtColor(neighbor_img, cv2.COLOR_RGB2GRAY)
-            
-            target_img_gray = cv2.normalize(target_img_gray, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
-            neighbor_img_gray = cv2.normalize(neighbor_img_gray, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
-
-            # find the keypoints and descriptors with sift
-
-            neighbor_kps, neighbor_des = self.sift.detectAndCompute(neighbor_img_gray, None)
-            target_kps, target_des = self.sift.detectAndCompute(target_img_gray, None)
-
-            # use knn algorithm
-            matches = None
-            try:
-                matches = self.flann.knnMatch(neighbor_des, target_des, k = 2)
-            except:
-                print("Matches error occured !")
-
-            if matches == None: continue
-
-            # remove error matches
-            good = []
-            for m, n in matches:
-                if m.distance <= 0.4 * n.distance:
-                    good.append(m)
-            
-            if len(good) > self.min_match_count:
-                src_pts = np.float32([neighbor_kps[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
-                dst_pts = np.float32([target_kps[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
-                
-                # compute homography matrix
-                homography_matrix, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-                
-                # warp neighbor image
-                try:
-                    align_neighbor = cv2.warpPerspective(neighbor_img, homography_matrix, (w, h))
-                except:
-                    print("Error occured in warp function !") 
-                    continue
-
-                # transfer numpy array to tensor
-                neighbor_align = align_neighbor.astype(np.float32) / 255.
-                neighbor_align_tensor = torch.from_numpy(neighbor_align).permute(2, 0, 1).cuda()
-                neighbor[i, :, :, :] = neighbor_align_tensor
-            
-            else:
-                continue
-
-        return neighbor
-
-    def forward(self, x):
-        assert isinstance(x, torch.Tensor), (
-            print("input x must be torch.Tensor !")
-        )
-
-        b, t, c, h, w = x.size()
-        center_index = c // 2
-
-        center_frame = x[:, center_index, :, :, :]  # Get center frame
-
-        for i in range(t):
-            if i != center_index and abs(center_index-i) == 1: # abs(center_index - i) == 1
-                neighbor = x[:, i, :, :, :].clone()
-
-                if self.with_sift:
-                    x[:, i, :, :, :] = self.align_frame_sift(center_frame, neighbor)
-                
-        return x
 
 class DftFeatureExtractor(nn.Module):
     def __init__(self, mid_channels=64, num_blocks=20, with_gauss=False, guass_key = 1.0):
