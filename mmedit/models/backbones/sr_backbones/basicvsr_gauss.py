@@ -11,11 +11,8 @@ from mmedit.models.common import (PixelShufflePack, ResidualBlockNoBN,
 from mmedit.models.registry import BACKBONES
 from mmedit.utils import get_root_logger
 from .edvr_net import PCDAlignment, TSAFusion
-import cv2
-import numpy as np
 import math
-from .raft_net import BasicUpdateBlock, SmallUpdateBlock, BasicEncoder, SmallEncoder, CorrBlock, AlternateCorrBlock, bilinear_sampler, coords_grid, upflow8
-from scipy import interpolate
+from .raft_net import SmallUpdateBlock, SmallEncoder, CorrBlock, coords_grid, upflow8
 
 try:
     autocast = torch.cuda.amp.autocast
@@ -103,6 +100,18 @@ class BasicVSRGaussModulation(nn.Module):
 
         self.dft_fusion_backward = nn.Conv2d(2 * mid_channels + 3, mid_channels + 3, 3, 1, 1, bias=True)
         self.dft_fusion_forward = nn.Conv2d(3 * mid_channels + 3, 2 * mid_channels + 3, 3, 1, 1, bias=True)
+
+        # Pyramid attention module
+        self.with_pyramid_attention = True
+
+        # embedding layer
+        self.embedding_refill_l1 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
+        self.embedding_refill_l2 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
+        self.embedding_refill_l3 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
+
+        self.embedding_prop_l1 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
+        self.embedding_prop_l2 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
+        self.embedding_prop_l3 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
 
     def spatial_padding(self, lrs):
         """ Apply pdding spatially.
@@ -193,6 +202,27 @@ class BasicVSRGaussModulation(nn.Module):
 
         return flows_forward, flows_backward
 
+    def pyramid_attention(self, prop, refill):
+        """Compute attention map between feature prop and refill.
+
+        Args:
+            prop (tensor): Input prop feature map with shape (n, c, h, w)
+            refill (tensor): Input refill feature map with shape (n, c, h, w)
+
+        Return:
+            Tensor: Output attention map with shape (n, c, h, w).
+        """
+        b, c, h, w = prop.size()
+
+        prop_l1 = self.embedding_prop_l1(prop)
+        refill_l1 = self.embedding_refill_l1(refill)
+
+        att = F.softmax(torch.cat((prop_l1, refill_l1), dim=1)) # [b, 2 * mid_channels, h, w]
+        
+        feat_prop = prop * att[:, :c, :, :] * 2
+
+        return feat_prop
+
     def forward(self, lrs):
         """Forward function for BasicVSR.
 
@@ -225,7 +255,6 @@ class BasicVSRGaussModulation(nn.Module):
         feats_refill = self.compute_refill_features(lrs, keyframe_idx)   # dict; feats_refill[0] shape: [b, mid_channels, h, w]
 
         # compute dft feature
-        # dft_features = [self.dft_feature_extractor(lrs[:, i, :, :, :]) for i in range(t)]
         dft_features = [self.dft_feature_extractor(feats_refill[i]) for i in range(t)]
 
         # backward-time propgation
@@ -237,19 +266,19 @@ class BasicVSRGaussModulation(nn.Module):
                 flow = flows_backward[:, i, :, :, :]   # [b, 2, h, w]
                 feat_prop = flow_warp(feat_prop, flow.permute(0, 2, 3, 1))
 
-            # Attention implement
-            # print("feat prop shape: ", feat_prop.size())
-            # print("feat_refill shape: ", feats_refill[0].size())
-
             if i in keyframe_idx:
-                feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)  # [b, 2 * mid_channles, h, w]
-                feat_prop = self.backward_fusion(feat_prop)  # [b, mid_channels, h, w]
+                # Pyramid attention module
+                if self.with_pyramid_attention:
+                    feat_prop = self.pyramid_attention(feat_prop.clone(), feats_refill[i].clone())
 
-            feat_prop = torch.cat([lr_curr, feat_prop], dim=1) # [b, mid_channel + 3, h, w]
+                feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)  # [b, 2 * mid_channles, h, w]
+                feat_prop = self.backward_fusion(feat_prop)                 # [b, mid_channels, h, w]
+
+            feat_prop = torch.cat([lr_curr, feat_prop], dim=1)          # [b, mid_channel + 3, h, w]
 
             # DFT feature extractor
             if self.with_dft_feature_extractor:
-                dft_feature = dft_features[i]  # [b, mid_channels, h, w]
+                dft_feature = dft_features[i]                           # [b, mid_channels, h, w]
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)  # [b, 2 * mid_channles + 3, h, w]
                 feat_prop = self.dft_fusion_backward(feat_prop)  
              
@@ -270,6 +299,10 @@ class BasicVSRGaussModulation(nn.Module):
                 feat_prop = flow_warp(feat_prop, flow.permute(0, 2, 3, 1))
 
             if i in keyframe_idx:  # information-refill
+                # Pyramid attention module
+                if self.with_pyramid_attention:
+                    feat_prop = self.pyramid_attention(feat_prop.clone(), feats_refill[i].clone())
+
                 feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)
                 feat_prop = self.forward_fusion(feat_prop)
 
@@ -689,15 +722,15 @@ class DftFeatureExtractor(nn.Module):
         x_proj = (2 * math.pi * x)
 
         if self.with_gauss:
-            B = torch.randn((h,h)).to(lr.device)
+            gauss_b = torch.randn((h,h)).to(lr.device)
 
             # modulate the gauss mat
             gauss_key =  torch.ones((b,1,h,h)) * self.guass_key
             gauss_key = gauss_key.to(lr.device)
             gauss_key = self.modulation(gauss_key)
-            B = B * gauss_key
+            gauss_b = gauss_b * gauss_key
 
-            x_proj = torch.matmul(B, x_proj)
+            x_proj = torch.matmul(gauss_b, x_proj)
             
         dft_feature = torch.cat((torch.sin(x_proj), torch.cos(x_proj)),dim=1)  # [b, 2 * mid_channels, h, w]
 

@@ -101,8 +101,6 @@ data = dict(
     # val
     val=dict(
         type=val_dataset_type,
-        # lq_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp_bicubic/X4',
-        # gt_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp',
         lq_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp_bicubic/X4',
         gt_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp',
         num_input_frames=100,
@@ -113,8 +111,6 @@ data = dict(
     # test
     test=dict(
         type=val_dataset_type,
-        # lq_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp_bicubic/X4',
-        # gt_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp',
         lq_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp_bicubic/X4',
         gt_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp',
         num_input_frames=100,
@@ -130,7 +126,7 @@ optimizers = dict(
         type='Adam',
         lr=4e-4,
         betas=(0.9, 0.99),
-        paramwise_cfg=dict(custom_keys={'spynet': dict(lr_mult=0.125)})))
+        paramwise_cfg=dict(custom_keys={'raftnet': dict(lr_mult=0.125)})))
 
 # learning policy
 total_iters = 300000
@@ -141,11 +137,11 @@ lr_config = dict(
     restart_weights=[1],
     min_lr=1e-7)
 
-checkpoint_config = dict(interval=100, save_optimizer=True, by_epoch=False)
+checkpoint_config = dict(interval=1000, save_optimizer=True, by_epoch=False)
 # remove gpu_collect=True in non distributed training
-evaluation = dict(interval=100, save_image=False, gpu_collect=True)
+evaluation = dict(interval=1000, save_image=False, gpu_collect=True)
 log_config = dict(
-    interval=5,
+    interval=10,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=False),
         # dict(type='TensorboardLoggerHook'),
