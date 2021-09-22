@@ -279,7 +279,6 @@ class BasicVSRGaussModulation(nn.Module):
             # DFT feature extractor
             if self.with_dft_feature_extractor:
                 dft_feature = dft_features[i]  # [b, mid_channels, h, w]
-
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)  # [b, 2 * mid_channles + 3, h, w]
                 feat_prop = self.dft_fusion_backward(feat_prop)
                 
@@ -310,6 +309,8 @@ class BasicVSRGaussModulation(nn.Module):
                 dft_feature = dft_features[i]
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)
                 feat_prop = self.dft_fusion_forward(feat_prop)
+
+                feat_prop += dft_feature
 
             feat_prop = self.forward_resblocks(feat_prop)  # [b, mid_channel, h, w]
 
@@ -1020,8 +1021,8 @@ class DftFeatureExtractor(nn.Module):
             DFT feature maps of lr image.              
         """
         assert isinstance(lr, torch.Tensor), (
-            print("lr must be Torch.Tensor!")
-        )
+            print("lr must be Torch.Tensor!"))
+
         b, c, h, w = lr.size()
 
         x = self.conv_first(lr) # [b, mid_channels, h, w]

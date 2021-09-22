@@ -15,9 +15,9 @@ model = dict(
         'iconvsr/edvrm_reds_20210413-3867262f.pth',
         with_homography_align=False,
         with_dft=True),
-    pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='mean'))
+    pixel_loss=dict(type='MultiLoss', loss_weight=1.0, reduction='mean'))
 # model training and testing settings
-train_cfg = dict(fix_iter=5000)
+train_cfg = dict(fix_iter=10000)
 test_cfg = dict(metrics=['PSNR', 'SSIM'], crop_border=0)
 
 # dataset settings
@@ -129,7 +129,7 @@ data = dict(
 optimizers = dict(
     generator=dict(
         type='Adam',
-        lr=2e-4,
+        lr=4e-4,
         betas=(0.9, 0.99),
         paramwise_cfg=dict(custom_keys={'spynet': dict(lr_mult=0.125)})))
 

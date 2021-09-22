@@ -288,4 +288,4 @@ class MultiLoss(nn.Module):
 
         focal_loss_ = focal_loss(pred, target)
 
-        return self.loss_weight * charbonnier_loss_ + self.loss_weight * focal_loss_
+        return self.loss_weight * charbonnier_loss_ + self.loss_weight * 0.25 * focal_loss_
