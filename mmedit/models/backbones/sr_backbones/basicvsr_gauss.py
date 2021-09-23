@@ -112,6 +112,13 @@ class BasicVSRGaussModulation(nn.Module):
         self.embedding_prop_l1 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
         self.embedding_prop_l2 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
         self.embedding_prop_l3 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
+        
+        # pooling layer
+        self.max_pool = nn.MaxPool2d(3, stride=2, padding=1)
+        self.avg_pool = nn.AvgPool2d(3, stride=2, padding=1)
+
+        self.level2_att_fusion = nn.Conv2d(2 * mid_channels, mid_channels, 3, 1, 1, bias=False)
+        self.level3_att_fusion = nn.Conv2d(2 * mid_channels, mid_channels, 3, 1, 1, bias=False)
 
     def spatial_padding(self, lrs):
         """ Apply pdding spatially.
@@ -217,14 +224,21 @@ class BasicVSRGaussModulation(nn.Module):
         # L1 level attention
         prop_l1 = self.lrelu(self.embedding_prop_l1(prop))
         refill_l1 = self.lrelu(self.embedding_refill_l1(refill))
-        att_l1 = F.softmax(torch.cat((prop_l1, refill_l1), dim=1)) # [b, 2 * mid_channels, h, w]
+        att_l1 = F.softmax(torch.cat((prop_l1, refill_l1), dim=1), dim=1) # [b, 2 * mid_channels, h, w]
 
         # L2 level attention
         prop_level2 = F.interpolate(prop, (h // 2, w // 2), mode='bilinear', align_corners=False)
         refill_level2 = F.interpolate(refill, (h // 2, w // 2), mode='bilinear', align_corners=False)
         prop_l2 = self.lrelu(self.embedding_prop_l2(prop_level2))
         refill_l2 = self.lrelu(self.embedding_refill_l2(refill_level2))
-        att_l2 = F.softmax(torch.cat((prop_l2, refill_l2), dim=1))
+
+        prop_l2_max, prop_l2_avg = self.max_pool(prop_l2), self.avg_pool(prop_l2)
+        refill_l2_max, refill_l2_avg = self.max_pool(refill_l2), self.avg_pool(refill_l2)
+
+        prop_l2 = self.level2_att_fusion(torch.cat((prop_l2_max, prop_l2_avg), dim=1))
+        refill_l2 = self.level2_att_fusion(torch.cat((refill_l2_max, refill_l2_avg), dim=1))
+
+        att_l2 = F.softmax(torch.cat((prop_l2, refill_l2), dim=1), dim=1)
         att_l2 = F.interpolate(att_l2, (h, w), mode='bilinear', align_corners=False)
 
         # L3 level attention
@@ -232,7 +246,14 @@ class BasicVSRGaussModulation(nn.Module):
         refill_level3 = F.interpolate(refill, (h //4, w // 4), mode='bilinear', align_corners=False)
         prop_l3 = self.lrelu(self.embedding_prop_l3(prop_level3))
         refill_l3 = self.lrelu(self.embedding_refill_l3(refill_level3))
-        att_l3 = F.softmax(torch.cat((prop_l3, refill_l3), dim=1)) # [b, 2 * mid_channels, h, w]
+
+        prop_l3_max, prop_l3_avg = self.max_pool(prop_l3), self.avg_pool(prop_l3)
+        refill_l3_max, refill_l3_avg = self.max_pool(refill_l3), self.avg_pool(refill_l3)
+
+        prop_l3 = self.level3_att_fusion(torch.cat((prop_l3_max, prop_l3_avg), dim=1))
+        refill_l3 = self.level3_att_fusion(torch.cat((refill_l3_max, refill_l3_avg), dim=1))
+
+        att_l3 = F.softmax(torch.cat((prop_l3, refill_l3), dim=1), dim=1) # [b, 2 * mid_channels, h, w]
         att_l3 = F.interpolate(att_l3, (h, w), mode='bilinear', align_corners=False)
 
         feat_prop = prop * (att_l1[:, :c, :, :] + att_l2[:, :c, :, :] +  att_l3[:, :c, :, :]) * 2

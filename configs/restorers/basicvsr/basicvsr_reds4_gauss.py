@@ -14,7 +14,7 @@ model = dict(
         edvr_pretrained='https://download.openmmlab.com/mmediting/restorers/'
         'iconvsr/edvrm_reds_20210413-3867262f.pth',
         with_dft=True),
-    pixel_loss=dict(type='MultiLoss', loss_weight=1.0, reduction='mean'))
+    pixel_loss=dict(type='PCFLoss', loss_weight=1.0, reduction='mean'))
 # model training and testing settings
 train_cfg = dict(fix_iter=5000)
 test_cfg = dict(metrics=['PSNR', 'SSIM'], crop_border=0)
