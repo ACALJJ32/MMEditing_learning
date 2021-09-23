@@ -16,7 +16,7 @@ model = dict(
         with_dft=True),
     pixel_loss=dict(type='MultiLoss', loss_weight=1.0, reduction='mean'))
 # model training and testing settings
-train_cfg = dict(fix_iter=10000)
+train_cfg = dict(fix_iter=5000)
 test_cfg = dict(metrics=['PSNR', 'SSIM'], crop_border=0)
 
 # dataset settings
@@ -129,19 +129,19 @@ optimizers = dict(
         paramwise_cfg=dict(custom_keys={'raftnet': dict(lr_mult=0.125)})))
 
 # learning policy
-total_iters = 300000
+total_iters = 600000
 lr_config = dict(
     policy='CosineRestart',
     by_epoch=False,
-    periods=[300000],
+    periods=[600000],
     restart_weights=[1],
     min_lr=1e-7)
 
-checkpoint_config = dict(interval=1000, save_optimizer=True, by_epoch=False)
+checkpoint_config = dict(interval=5000, save_optimizer=True, by_epoch=False)
 # remove gpu_collect=True in non distributed training
-evaluation = dict(interval=1000, save_image=False, gpu_collect=True)
+evaluation = dict(interval=5000, save_image=False, gpu_collect=True)
 log_config = dict(
-    interval=10,
+    interval=100,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=False),
         # dict(type='TensorboardLoggerHook'),

@@ -8,7 +8,7 @@ from mmcv.runner import load_checkpoint
 
 from mmedit.models.common import (PixelShufflePack, ResidualBlockNoBN,
                                   flow_warp, make_layer)
-from mmedit.models.registry import BACKBONES
+from mmedit.models.registry import BACKBONES, MODELS
 from mmedit.utils import get_root_logger
 from .edvr_net import PCDAlignment, TSAFusion
 import math
@@ -214,12 +214,28 @@ class BasicVSRGaussModulation(nn.Module):
         """
         b, c, h, w = prop.size()
 
-        prop_l1 = self.embedding_prop_l1(prop)
-        refill_l1 = self.embedding_refill_l1(refill)
+        # L1 level attention
+        prop_l1 = self.lrelu(self.embedding_prop_l1(prop))
+        refill_l1 = self.lrelu(self.embedding_refill_l1(refill))
+        att_l1 = F.softmax(torch.cat((prop_l1, refill_l1), dim=1)) # [b, 2 * mid_channels, h, w]
 
-        att = F.softmax(torch.cat((prop_l1, refill_l1), dim=1)) # [b, 2 * mid_channels, h, w]
-        
-        feat_prop = prop * att[:, :c, :, :] * 2
+        # L2 level attention
+        prop_level2 = F.interpolate(prop, (h // 2, w // 2), mode='bilinear', align_corners=False)
+        refill_level2 = F.interpolate(refill, (h // 2, w // 2), mode='bilinear', align_corners=False)
+        prop_l2 = self.lrelu(self.embedding_prop_l2(prop_level2))
+        refill_l2 = self.lrelu(self.embedding_refill_l2(refill_level2))
+        att_l2 = F.softmax(torch.cat((prop_l2, refill_l2), dim=1))
+        att_l2 = F.interpolate(att_l2, (h, w), mode='bilinear', align_corners=False)
+
+        # L3 level attention
+        prop_level3 = F.interpolate(prop, (h // 4, w // 4), mode='bilinear', align_corners=False)
+        refill_level3 = F.interpolate(refill, (h //4, w // 4), mode='bilinear', align_corners=False)
+        prop_l3 = self.lrelu(self.embedding_prop_l3(prop_level3))
+        refill_l3 = self.lrelu(self.embedding_refill_l3(refill_level3))
+        att_l3 = F.softmax(torch.cat((prop_l3, refill_l3), dim=1)) # [b, 2 * mid_channels, h, w]
+        att_l3 = F.interpolate(att_l3, (h, w), mode='bilinear', align_corners=False)
+
+        feat_prop = prop * (att_l1[:, :c, :, :] + att_l2[:, :c, :, :] +  att_l3[:, :c, :, :]) * 2
 
         return feat_prop
 
