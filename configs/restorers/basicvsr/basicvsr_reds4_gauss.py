@@ -9,8 +9,8 @@ model = dict(
         num_blocks=30,
         keyframe_stride=1,
         padding=2,
-        raftnet_pretrained='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/'
-        'ljj/VSR/mmediting_cuc/weight/raft/raft-small.pth',
+        spynet_pretrained='https://download.openmmlab.com/mmediting/restorers/'
+        'basicvsr/spynet_20210409-c6c1bd09.pth',
         edvr_pretrained='https://download.openmmlab.com/mmediting/restorers/'
         'iconvsr/edvrm_reds_20210413-3867262f.pth',
         with_dft=True),
@@ -124,9 +124,9 @@ data = dict(
 optimizers = dict(
     generator=dict(
         type='Adam',
-        lr=4e-4,
+        lr=2e-4,
         betas=(0.9, 0.99),
-        paramwise_cfg=dict(custom_keys={'raftnet': dict(lr_mult=0.125)})))
+        paramwise_cfg=dict(custom_keys={'spynet': dict(lr_mult=0.125)})))
 
 # learning policy
 total_iters = 600000

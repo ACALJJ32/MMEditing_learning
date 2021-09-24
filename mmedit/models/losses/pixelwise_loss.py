@@ -323,4 +323,4 @@ class PCFLoss(nn.Module):
         l2 = self.loss_weight * charbonnier_loss_l2 + self.loss_weight * 0.25 * focal_loss_l2
         l3 = self.loss_weight * charbonnier_loss_l3 + self.loss_weight * 0.25 * focal_loss_l3
 
-        return l1 + l2 + l3
+        return l1 + 0.15 * l2 + 0.10 * l3

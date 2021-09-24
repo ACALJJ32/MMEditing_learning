@@ -14,7 +14,7 @@ from .srcnn import SRCNN
 from .tdan_net import TDANNet
 from .tof import TOFlow
 from .ttsr_net import TTSRNet
-from .basicvsr_gauss import BasicVSRGaussModulation
+from .basicvsr_gauss_attention import BasicVSRGaussModulation
 
 __all__ = [
     'MSRResNet', 'RRDBNet', 'EDSR', 'EDVRNet', 'TOFlow', 'SRCNN', 'DICNet',
