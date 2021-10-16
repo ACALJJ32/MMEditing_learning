@@ -89,7 +89,7 @@ class BasicVSRGaussModulation(nn.Module):
         self.dft_fusion_forward = nn.Conv2d(3 * mid_channels + 3, 2 * mid_channels + 3, 3, 1, 1, bias=True)
 
         # Pyramid attention module
-        self.with_pyramid_attention = True
+        self.with_pyramid_attention = False
 
         # embedding layer
         self.embedding_refill_l1 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)

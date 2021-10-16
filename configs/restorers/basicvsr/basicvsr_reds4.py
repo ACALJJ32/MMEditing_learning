@@ -92,8 +92,8 @@ data = dict(
         times=1000,
         dataset=dict(
             type=train_dataset_type,
-            lq_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp_bicubic/X4',
-            gt_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp',
+            lq_folder='/media/test/Disk2/DATA/VSR/Youku/LR',
+            gt_folder='/media/test/Disk2/DATA/VSR/Youku/HR',
             num_input_frames=15,
             pipeline=train_pipeline,
             scale=4,
@@ -102,10 +102,8 @@ data = dict(
     # val
     val=dict(
         type=val_dataset_type,
-        # lq_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp_bicubic/X4',
-        # gt_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp',
-        lq_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp_bicubic/X4',
-        gt_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp',
+        lq_folder='/media/test/Disk2/DATA/VSR/Youku/LR',
+        gt_folder='/media/test/Disk2/DATA/VSR/Youku/HR',
         num_input_frames=100,
         pipeline=test_pipeline,
         scale=4,
@@ -114,10 +112,8 @@ data = dict(
     # test
     test=dict(
         type=val_dataset_type,
-        # lq_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp_bicubic/X4',
-        # gt_folder='/media/noerrors/2ebff7c9-6843-41c4-9307-63072b7eab51/ljj/DATA/REDS/val/val_sharp',
-        lq_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp_bicubic/X4',
-        gt_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp',
+        lq_folder='/media/test/Disk2/DATA/VSR/Youku/LR',
+        gt_folder='/media/test/Disk2/DATA/VSR/Youku/HR',
         num_input_frames=100,
         pipeline=test_pipeline,
         scale=4,
@@ -134,11 +130,11 @@ optimizers = dict(
         paramwise_cfg=dict(custom_keys={'spynet': dict(lr_mult=0.125)})))
 
 # learning policy
-total_iters = 300000
+total_iters = 600000
 lr_config = dict(
     policy='CosineRestart',
     by_epoch=False,
-    periods=[300000],
+    periods=[600000],
     restart_weights=[1],
     min_lr=1e-7)
 

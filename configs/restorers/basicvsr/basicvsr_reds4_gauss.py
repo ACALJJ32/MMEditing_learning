@@ -1,4 +1,4 @@
-exp_name = 'basicvsr_reds4_gauss_raft_attention'
+exp_name = 'basicvsr_reds4_dft'
 
 # model settings
 model = dict(
@@ -14,7 +14,7 @@ model = dict(
         edvr_pretrained='https://download.openmmlab.com/mmediting/restorers/'
         'iconvsr/edvrm_reds_20210413-3867262f.pth',
         with_dft=True),
-    pixel_loss=dict(type='PCFLoss', loss_weight=1.0, reduction='mean'))
+    pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='mean'))
 # model training and testing settings
 train_cfg = dict(fix_iter=5000)
 test_cfg = dict(metrics=['PSNR', 'SSIM'], crop_border=0)
@@ -129,11 +129,11 @@ optimizers = dict(
         paramwise_cfg=dict(custom_keys={'spynet': dict(lr_mult=0.125)})))
 
 # learning policy
-total_iters = 600000
+total_iters = 300000
 lr_config = dict(
     policy='CosineRestart',
     by_epoch=False,
-    periods=[600000],
+    periods=[300000],
     restart_weights=[1],
     min_lr=1e-7)
 
