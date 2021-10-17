@@ -1,4 +1,4 @@
-exp_name = 'basicvsr_reds4_dft'
+exp_name = 'basicvsr_reds4_dft_pcfLoss'
 
 # model settings
 model = dict(
@@ -14,7 +14,7 @@ model = dict(
         edvr_pretrained='https://download.openmmlab.com/mmediting/restorers/'
         'iconvsr/edvrm_reds_20210413-3867262f.pth',
         with_dft=True),
-    pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='mean'))
+    pixel_loss=dict(type='PCFLoss', loss_weight=1.0, reduction='mean'))
 # model training and testing settings
 train_cfg = dict(fix_iter=5000)
 test_cfg = dict(metrics=['PSNR', 'SSIM'], crop_border=0)
@@ -81,7 +81,7 @@ demo_pipeline = [
 
 data = dict(
     workers_per_gpu=6,
-    train_dataloader=dict(samples_per_gpu=2, drop_last=True),  # 2 gpus  Batch size of a single GPU
+    train_dataloader=dict(samples_per_gpu=4, drop_last=True),  # 2 gpus  Batch size of a single GPU
     val_dataloader=dict(samples_per_gpu=1),
     test_dataloader=dict(samples_per_gpu=1, workers_per_gpu=1),
 

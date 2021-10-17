@@ -253,6 +253,9 @@ class MaskedTVLoss(L1Loss):
         return loss
 
 
+# @LOSSES.register_module()
+# class FocalLoss(nn.Module):
+
 
 @LOSSES.register_module()
 class PCFLoss(nn.Module):
@@ -306,21 +309,22 @@ class PCFLoss(nn.Module):
         focal_loss_l2 = focal_loss(pred_l2, target_l2)
 
         # L3
-        pred_l3 = F.interpolate(pred_reshape, (h // 4, w // 4), mode='bilinear', align_corners=False)
-        target_l3 = F.interpolate(target_reshape, (h // 4, w // 4), mode='bilinear', align_corners=False)
+        # pred_l3 = F.interpolate(pred_reshape, (h // 4, w // 4), mode='bilinear', align_corners=False)
+        # target_l3 = F.interpolate(target_reshape, (h // 4, w // 4), mode='bilinear', align_corners=False)
         
-        charbonnier_loss_l3 = charbonnier_loss(
-            pred_l3,
-            target_l3,
-            weight,
-            eps=self.eps,
-            reduction=self.reduction,
-            sample_wise=self.sample_wise)
-        focal_loss_l3 = focal_loss(pred_l3, target_l3)
+        # charbonnier_loss_l3 = charbonnier_loss(
+        #     pred_l3,
+        #     target_l3,
+        #     weight,
+        #     eps=self.eps,
+        #     reduction=self.reduction,
+        #     sample_wise=self.sample_wise)
+        # focal_loss_l3 = focal_loss(pred_l3, target_l3)
 
 
-        l1 = self.loss_weight * charbonnier_loss_l1 + self.loss_weight * 0.25 * focal_loss_l1
-        l2 = self.loss_weight * charbonnier_loss_l2 + self.loss_weight * 0.25 * focal_loss_l2
-        l3 = self.loss_weight * charbonnier_loss_l3 + self.loss_weight * 0.25 * focal_loss_l3
+        l1 = self.loss_weight * charbonnier_loss_l1 + self.loss_weight * 0.20 * focal_loss_l1
+        l2 = self.loss_weight * charbonnier_loss_l2 + self.loss_weight * 0.20 * focal_loss_l2
+        # l3 = self.loss_weight * charbonnier_loss_l3 + self.loss_weight * 0.20 * focal_loss_l3
 
-        return l1 + 0.15 * l2 + 0.10 * l3
+        # return l1 + 0.10 * l2 + 0.10 * l3
+        return l1 + 0.10 * l2 
