@@ -1,4 +1,4 @@
-exp_name = 'basicvsr_reds4_dft_pcfLoss'
+exp_name = 'basicvsr_reds4_dft_charbonnier_three_level'
 
 # model settings
 model = dict(
@@ -91,8 +91,8 @@ data = dict(
         times=1000,
         dataset=dict(
             type=train_dataset_type,
-            lq_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp_bicubic/X4',
-            gt_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp',
+            lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
+            gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
             num_input_frames=15,
             pipeline=train_pipeline,
             scale=4,
@@ -101,8 +101,8 @@ data = dict(
     # val
     val=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp_bicubic/X4',
-        gt_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp',
+        lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
+        gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
         num_input_frames=100,
         pipeline=test_pipeline,
         scale=4,
@@ -111,8 +111,8 @@ data = dict(
     # test
     test=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp_bicubic/X4',
-        gt_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/DATA/REDS/train/train_sharp',
+        lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
+        gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
         num_input_frames=100,
         pipeline=test_pipeline,
         scale=4,
@@ -129,11 +129,11 @@ optimizers = dict(
         paramwise_cfg=dict(custom_keys={'spynet': dict(lr_mult=0.125)})))
 
 # learning policy
-total_iters = 300000
+total_iters = 600000
 lr_config = dict(
     policy='CosineRestart',
     by_epoch=False,
-    periods=[300000],
+    periods=[600000],
     restart_weights=[1],
     min_lr=1e-7)
 

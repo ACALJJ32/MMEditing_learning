@@ -14,14 +14,14 @@ model = dict(
         res_scale=1,
         rgb_mean=(0.4488, 0.4371, 0.4040),
         rgb_std=(1.0, 1.0, 1.0)),
-    pixel_loss=dict(type='L1Loss', loss_weight=1.0, reduction='mean'))
+    pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='mean'))
 # model training and testing settings
 train_cfg = None
 test_cfg = dict(metrics=['PSNR', 'SSIM'], crop_border=scale)
 
 # dataset settings
-train_dataset_type = 'SRAnnotationDataset'
-val_dataset_type = 'SRFolderDataset'
+train_dataset_type = 'SRREDSDataset'
+val_dataset_type = 'SRREDSDataset'
 train_pipeline = [
     dict(
         type='LoadImageFromFile',
@@ -72,8 +72,8 @@ test_pipeline = [
 ]
 
 data = dict(
-    workers_per_gpu=8,
-    train_dataloader=dict(samples_per_gpu=16, drop_last=True),
+    workers_per_gpu=4,
+    train_dataloader=dict(samples_per_gpu=1, drop_last=True),
     val_dataloader=dict(samples_per_gpu=1),
     test_dataloader=dict(samples_per_gpu=1),
     train=dict(
@@ -81,25 +81,65 @@ data = dict(
         times=1000,
         dataset=dict(
             type=train_dataset_type,
-            lq_folder='data/DIV2K/DIV2K_train_LR_bicubic/X4_sub',
-            gt_folder='data/DIV2K/DIV2K_train_HR_sub',
-            ann_file='data/DIV2K/meta_info_DIV2K800sub_GT.txt',
+            lq_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_540p_train_frames',
+            gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
+            ann_file='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/meta_info_GKY_GT.txt',
+            num_input_frames=5,
             pipeline=train_pipeline,
-            scale=scale)),
+            scale=4,
+            val_partition='REDS4',
+            test_mode=False)),
     val=dict(
         type=val_dataset_type,
-        lq_folder='data/val_set5/Set5_bicLRx4',
-        gt_folder='data/val_set5/Set5',
+        lq_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_540p_train_frames',
+        gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
+        ann_file='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/meta_info_GKY_GT.txt',
+        num_input_frames=5,
         pipeline=test_pipeline,
-        scale=scale,
-        filename_tmpl='{}'),
+        scale=4,
+        val_partition='REDS4',
+        test_mode=True),
     test=dict(
         type=val_dataset_type,
-        lq_folder='data/val_set5/Set5_bicLRx4',
-        gt_folder='data/val_set5/Set5',
+        lq_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_540p_train_frames',
+        gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
+        ann_file='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/meta_info_GKY_GT.txt',
+        num_input_frames=5,
         pipeline=test_pipeline,
-        scale=scale,
-        filename_tmpl='{}'))
+        scale=4,
+        val_partition='REDS4',
+        test_mode=True),
+)
+
+# data = dict(
+#     workers_per_gpu=8,
+#     train_dataloader=dict(samples_per_gpu=16, drop_last=True),
+#     val_dataloader=dict(samples_per_gpu=1),
+#     test_dataloader=dict(samples_per_gpu=1),
+#     train=dict(
+#         type='RepeatDataset',
+#         times=1000,
+#         dataset=dict(
+#             type=train_dataset_type,
+#             lq_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_540p_train_frames',
+#             gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
+#             ann_file='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/meta_info_GKY_GT.txt',
+#             pipeline=train_pipeline,
+#             scale=scale)),
+#     val=dict(
+#         type=val_dataset_type,
+#         lq_folder='/media/test/Disk2/DATA/VSR/REDS/val/val_sharp_bicubic/X4/000',
+#         gt_folder='/media/test/Disk2/DATA/VSR/REDS/val/val_sharp/000',
+#         pipeline=test_pipeline,
+#         scale=scale,
+#         filename_tmpl='{}'),
+#     test=dict(
+#         type=val_dataset_type,
+#         lq_folder='/media/test/Disk2/DATA/VSR/REDS/val/val_sharp_bicubic/X4/000',
+#         gt_folder='/media/test/Disk2/DATA/VSR/REDS/val/sharp/000',
+#         pipeline=test_pipeline,
+#         scale=scale,
+#         filename_tmpl='{}'))
 
 # optimizer
 optimizers = dict(generator=dict(type='Adam', lr=1e-4, betas=(0.9, 0.999)))
@@ -123,6 +163,6 @@ visual_config = None
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 work_dir = f'./work_dirs/{exp_name}'
-load_from = 'work_dirs/edsr_x2c64b16_g1_300k_div2k/iter_300000.pth'
+load_from = 'weight/edsr/edsr_x4c64b16_1x16_300k_div2k_20200608-3c2af8a3.pth'
 resume_from = None
 workflow = [('train', 1)]
