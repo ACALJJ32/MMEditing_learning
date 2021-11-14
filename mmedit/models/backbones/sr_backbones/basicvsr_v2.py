@@ -1,5 +1,3 @@
-from os import replace
-from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,30 +6,14 @@ from mmcv.runner import load_checkpoint
 
 from mmedit.models.common import (PixelShufflePack, ResidualBlockNoBN,
                                   flow_warp, make_layer)
-from mmedit.models.registry import BACKBONES
+from mmedit.models.registry import BACKBONES, MODELS
 from mmedit.utils import get_root_logger
 from .edvr_net import PCDAlignment, TSAFusion
-import cv2
-import numpy as np
 import math
-from .raft_net import BasicUpdateBlock, SmallUpdateBlock, BasicEncoder, SmallEncoder, CorrBlock, AlternateCorrBlock, bilinear_sampler, coords_grid, upflow8
-from scipy import interpolate
-
-try:
-    autocast = torch.cuda.amp.autocast
-except:
-    # dummy autocast for PyTorch < 1.6
-    class autocast:
-        def __init__(self, enabled):
-            pass
-        def __enter__(self):
-            pass
-        def __exit__(self, *args):
-            pass
 
 
 @BACKBONES.register_module()
-class BasicVSRNet(nn.Module):
+class BasicVSRGaussModulationV2(nn.Module):
     """BasicVSR network structure for video super-resolution.
 
     Support only x4 upsampling.
@@ -55,7 +37,6 @@ class BasicVSRNet(nn.Module):
                  padding=2,
                  spynet_pretrained=None,
                  edvr_pretrained=None,
-                 with_homography_align=False,
                  with_dft=False):
 
         super().__init__()
@@ -71,8 +52,7 @@ class BasicVSRNet(nn.Module):
         self.edvr = EDVRFeatureExtractor(
             num_frames=padding * 2 + 1,
             center_frame_idx=padding,
-            pretrained=edvr_pretrained,
-            with_homography_align=with_homography_align)
+            pretrained=edvr_pretrained)
         self.backward_fusion = nn.Conv2d(
             2 * mid_channels, mid_channels, 3, 1, 1, bias=True)
         self.forward_fusion = nn.Conv2d(
@@ -101,10 +81,29 @@ class BasicVSRNet(nn.Module):
 
         # DFT feature extractor
         self.with_dft_feature_extractor = with_dft
-        self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=5, with_gauss=True)
+        self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=10, with_gauss=True)
 
         self.dft_fusion_backward = nn.Conv2d(2 * mid_channels + 3, mid_channels + 3, 3, 1, 1, bias=True)
         self.dft_fusion_forward = nn.Conv2d(3 * mid_channels + 3, 2 * mid_channels + 3, 3, 1, 1, bias=True)
+
+        # Pyramid attention module
+        self.with_pyramid_attention = False
+
+        # embedding layer
+        self.embedding_refill_l1 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
+        self.embedding_refill_l2 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
+        self.embedding_refill_l3 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
+
+        self.embedding_prop_l1 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
+        self.embedding_prop_l2 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
+        self.embedding_prop_l3 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
+        
+        # pooling layer
+        self.max_pool = nn.MaxPool2d(3, stride=2, padding=1)
+        self.avg_pool = nn.AvgPool2d(3, stride=2, padding=1)
+
+        self.level2_att_fusion = nn.Conv2d(2 * mid_channels, mid_channels, 3, 1, 1, bias=False)
+        self.level3_att_fusion = nn.Conv2d(2 * mid_channels, mid_channels, 3, 1, 1, bias=False)
 
     def spatial_padding(self, lrs):
         """ Apply pdding spatially.
@@ -120,6 +119,7 @@ class BasicVSRNet(nn.Module):
             Tensor: Padded LR sequence with shape (n, t, c, h_pad, w_pad).
 
         """
+
         n, t, c, h, w = lrs.size()
 
         pad_h = (4 - h % 4) % 4
@@ -169,7 +169,7 @@ class BasicVSRNet(nn.Module):
         for i in keyframe_idx:
             feats_refill[i] = self.edvr(lrs[:, i:i + num_frames].contiguous())
         return feats_refill
-
+    
     def compute_flow(self, lrs):
         """Compute optical flow using SPyNet for feature warping.
 
@@ -199,7 +199,58 @@ class BasicVSRNet(nn.Module):
 
         return flows_forward, flows_backward
 
-    def forward(self, lrs):
+    def pyramid_attention(self, prop, refill):
+        """Compute attention map between feature prop and refill.
+
+        Args:
+            prop (tensor): Input prop feature map with shape (n, c, h, w)
+            refill (tensor): Input refill feature map with shape (n, c, h, w)
+
+        Return:
+            Tensor: Output attention map with shape (n, c, h, w).
+        """
+        b, c, h, w = prop.size()
+
+        # L1 level attention
+        prop_l1 = self.lrelu(self.embedding_prop_l1(prop))
+        refill_l1 = self.lrelu(self.embedding_refill_l1(refill))
+        att_l1 = F.softmax(torch.cat((prop_l1, refill_l1), dim=1), dim=1) # [b, 2 * mid_channels, h, w]
+
+        # L2 level attention
+        prop_level2 = F.interpolate(prop, (h // 2, w // 2), mode='bilinear', align_corners=False)
+        refill_level2 = F.interpolate(refill, (h // 2, w // 2), mode='bilinear', align_corners=False)
+        prop_l2 = self.lrelu(self.embedding_prop_l2(prop_level2))
+        refill_l2 = self.lrelu(self.embedding_refill_l2(refill_level2))
+
+        prop_l2_max, prop_l2_avg = self.max_pool(prop_l2), self.avg_pool(prop_l2)
+        refill_l2_max, refill_l2_avg = self.max_pool(refill_l2), self.avg_pool(refill_l2)
+
+        prop_l2 = self.level2_att_fusion(torch.cat((prop_l2_max, prop_l2_avg), dim=1))
+        refill_l2 = self.level2_att_fusion(torch.cat((refill_l2_max, refill_l2_avg), dim=1))
+
+        att_l2 = F.softmax(torch.cat((prop_l2, refill_l2), dim=1), dim=1)
+        att_l2 = F.interpolate(att_l2, (h, w), mode='bilinear', align_corners=False)
+
+        # L3 level attention
+        prop_level3 = F.interpolate(prop, (h // 4, w // 4), mode='bilinear', align_corners=False)
+        refill_level3 = F.interpolate(refill, (h //4, w // 4), mode='bilinear', align_corners=False)
+        prop_l3 = self.lrelu(self.embedding_prop_l3(prop_level3))
+        refill_l3 = self.lrelu(self.embedding_refill_l3(refill_level3))
+
+        prop_l3_max, prop_l3_avg = self.max_pool(prop_l3), self.avg_pool(prop_l3)
+        refill_l3_max, refill_l3_avg = self.max_pool(refill_l3), self.avg_pool(refill_l3)
+
+        prop_l3 = self.level3_att_fusion(torch.cat((prop_l3_max, prop_l3_avg), dim=1))
+        refill_l3 = self.level3_att_fusion(torch.cat((refill_l3_max, refill_l3_avg), dim=1))
+
+        att_l3 = F.softmax(torch.cat((prop_l3, refill_l3), dim=1), dim=1) # [b, 2 * mid_channels, h, w]
+        att_l3 = F.interpolate(att_l3, (h, w), mode='bilinear', align_corners=False)
+
+        feat_prop = prop * (att_l1[:, :c, :, :] + att_l2[:, :c, :, :] +  att_l3[:, :c, :, :]) * 2
+
+        return feat_prop
+
+    def forward(self, lrs, gts):
         """Forward function for BasicVSR.
 
         Args:
@@ -226,12 +277,12 @@ class BasicVSRNet(nn.Module):
         if keyframe_idx[-1] != t - 1:
             keyframe_idx.append(t - 1)  # the last frame must be a keyframe
 
-        # compute optical flow and compute features for information-refill
-        flows_forward, flows_backward = self.compute_flow(lrs)
-        feats_refill = self.compute_refill_features(lrs, keyframe_idx)
+        # compute optical flow and compute features for information-refill  
+        flows_forward, flows_backward = self.compute_flow(lrs)  
+        feats_refill = self.compute_refill_features(lrs, keyframe_idx)   # dict; feats_refill[0] shape: [b, mid_channels, h, w]
 
         # compute dft feature
-        dft_features = [self.dft_feature_extractor(lrs[:, i, :, :, :]) for i in range(t)]
+        dft_features = [self.dft_feature_extractor(feats_refill[i]) for i in keyframe_idx]
 
         # backward-time propgation
         outputs = []
@@ -239,21 +290,25 @@ class BasicVSRNet(nn.Module):
         for i in range(t - 1, -1, -1):
             lr_curr = lrs[:, i, :, :, :]
             if i < t - 1:  # no warping for the last timestep
-                flow = flows_backward[:, i, :, :, :]
+                flow = flows_backward[:, i, :, :, :]   # [b, 2, h, w]
                 feat_prop = flow_warp(feat_prop, flow.permute(0, 2, 3, 1))
-            if i in keyframe_idx:
-                feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)  # [b, 2 * mid_channles, h, w]
-                feat_prop = self.backward_fusion(feat_prop)  # [b, mid_channels, h, w]
 
-            feat_prop = torch.cat([lr_curr, feat_prop], dim=1) # [b, mid_channel + 3, h, w]
+            if i in keyframe_idx:
+                # Pyramid attention module
+                if self.with_pyramid_attention:
+                    feat_prop = self.pyramid_attention(feat_prop.clone(), feats_refill[i].clone())
+
+                feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)  # [b, 2 * mid_channles, h, w]
+                feat_prop = self.backward_fusion(feat_prop)                 # [b, mid_channels, h, w]
+
+            feat_prop = torch.cat([lr_curr, feat_prop], dim=1)          # [b, mid_channel + 3, h, w]
 
             # DFT feature extractor
-            if self.with_dft_feature_extractor:
-                dft_feature = dft_features[i]  # [b, mid_channels, h, w]
-
+            if self.with_dft_feature_extractor and i in keyframe_idx:
+                dft_feature = dft_features[i]                           # [b, mid_channels, h, w]
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)  # [b, 2 * mid_channles + 3, h, w]
-                feat_prop = self.dft_fusion_backward(feat_prop)
-                
+                feat_prop = self.dft_fusion_backward(feat_prop)  
+             
             feat_prop = self.backward_resblocks(feat_prop)
                         
             outputs.append(feat_prop)
@@ -271,13 +326,17 @@ class BasicVSRNet(nn.Module):
                 feat_prop = flow_warp(feat_prop, flow.permute(0, 2, 3, 1))
 
             if i in keyframe_idx:  # information-refill
+                # Pyramid attention module
+                if self.with_pyramid_attention:
+                    feat_prop = self.pyramid_attention(feat_prop.clone(), feats_refill[i].clone())
+
                 feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)
                 feat_prop = self.forward_fusion(feat_prop)
 
             feat_prop = torch.cat([lr_curr, outputs[i], feat_prop], dim=1)  # [b, 2 * mid_channels + 3, h, w]
 
             # DFT feature extractor
-            if self.with_dft_feature_extractor:
+            if self.with_dft_feature_extractor and i in keyframe_idx:
                 dft_feature = dft_features[i]
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)
                 feat_prop = self.dft_fusion_forward(feat_prop)
@@ -292,7 +351,7 @@ class BasicVSRNet(nn.Module):
             out += base                                  # [b, c, h, w]
             outputs[i] = out
 
-        return torch.stack(outputs, dim=1)[:, :, :, :4 * h_input, :4 * w_input]
+        return torch.stack(outputs, dim=1)[:, :, :, :4 * h_input, :4 * w_input], gts
 
     def init_weights(self, pretrained=None, strict=True):
         """Init weights for models.
@@ -543,7 +602,7 @@ class SPyNetBasicModule(nn.Module):
             Tensor: Refined flow with shape (b, 2, h, w)
         """
         return self.basic_module(tensor_input)
-    
+
 class EDVRFeatureExtractor(nn.Module):
     """EDVR feature extractor for information-refill in IconVSR.
 
@@ -625,10 +684,6 @@ class EDVRFeatureExtractor(nn.Module):
         elif pretrained is not None:
             raise TypeError(f'"pretrained" must be a str or None. '
                             f'But received {type(pretrained)}.')
-        
-        # Homography align
-        self.with_homography_align = with_homography_align
-        self.homography_align = FastHomographyAlign()
 
     def forward(self, x):
         """Forward function for EDVRFeatureExtractor.
@@ -637,10 +692,6 @@ class EDVRFeatureExtractor(nn.Module):
         Returns:
             Tensor: Intermediate feature with shape (n, mid_channels, h, w).
         """
-
-        # Homography align
-        if self.with_homography_align:
-            x = self.homography_align(x)
 
         n, t, c, h, w = x.size()
 
@@ -680,235 +731,10 @@ class EDVRFeatureExtractor(nn.Module):
 
         return feat
 
-class RAFTModule(nn.Module):
-    def __init__(self, args):
-        super(RAFTModule, self).__init__()
-        self.args = args
-
-        if args.small:
-            self.hidden_dim = hdim = 96
-            self.context_dim = cdim = 64
-            args.corr_levels = 4
-            args.corr_radius = 3
-        
-        else:
-            self.hidden_dim = hdim = 128
-            self.context_dim = cdim = 128
-            args.corr_levels = 4
-            args.corr_radius = 4
-
-        if 'dropout' not in self.args:
-            self.args.dropout = 0
-
-        if 'alternate_corr' not in self.args:
-            self.args.alternate_corr = False
-
-        # feature network, context network, and update block
-        if args.small:
-            self.fnet = SmallEncoder(output_dim=128, norm_fn='instance', dropout=args.dropout)        
-            self.cnet = SmallEncoder(output_dim=hdim+cdim, norm_fn='none', dropout=args.dropout)
-            self.update_block = SmallUpdateBlock(self.args, hidden_dim=hdim)
-
-        else:
-            self.fnet = BasicEncoder(output_dim=256, norm_fn='instance', dropout=args.dropout)        
-            self.cnet = BasicEncoder(output_dim=hdim+cdim, norm_fn='batch', dropout=args.dropout)
-            self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim)
-
-    def freeze_bn(self):
-        for m in self.modules():
-            if isinstance(m, nn.BatchNorm2d):
-                m.eval()
-
-    def initialize_flow(self, img):
-        """ Flow is represented as difference between two coordinate grids flow = coords1 - coords0"""
-        N, C, H, W = img.shape
-        coords0 = coords_grid(N, H//8, W//8).to(img.device)
-        coords1 = coords_grid(N, H//8, W//8).to(img.device)
-
-        # optical flow computed as difference: flow = coords1 - coords0
-        return coords0, coords1
-
-    def upsample_flow(self, flow, mask):
-        """ Upsample flow field [H/8, W/8, 2] -> [H, W, 2] using convex combination """
-        N, _, H, W = flow.shape
-        mask = mask.view(N, 1, 9, 8, 8, H, W)
-        mask = torch.softmax(mask, dim=2)
-
-        up_flow = F.unfold(8 * flow, [3,3], padding=1)
-        up_flow = up_flow.view(N, 2, 9, 1, 1, H, W)
-
-        up_flow = torch.sum(mask * up_flow, dim=2)
-        up_flow = up_flow.permute(0, 1, 4, 2, 5, 3)
-        return up_flow.reshape(N, 2, 8*H, 8*W)
-
-
-    def forward(self, image1, image2, iters=12, flow_init=None, upsample=True):
-        """ Estimate optical flow between pair of frames """
-
-        image1 = 2 * (image1 / 255.0) - 1.0
-        image2 = 2 * (image2 / 255.0) - 1.0
-
-        image1 = image1.contiguous()
-        image2 = image2.contiguous()
-
-        hdim = self.hidden_dim
-        cdim = self.context_dim
-
-        # run the feature network
-        with autocast(enabled=self.args.mixed_precision):
-            fmap1, fmap2 = self.fnet([image1, image2])        
-        
-        fmap1 = fmap1.float()
-        fmap2 = fmap2.float()
-        if self.args.alternate_corr:
-            corr_fn = AlternateCorrBlock(fmap1, fmap2, radius=self.args.corr_radius)
-        else:
-            corr_fn = CorrBlock(fmap1, fmap2, radius=self.args.corr_radius)
-
-        # run the context network
-        with autocast(enabled=self.args.mixed_precision):
-            cnet = self.cnet(image1)
-            net, inp = torch.split(cnet, [hdim, cdim], dim=1)
-            net = torch.tanh(net)
-            inp = torch.relu(inp)
-
-        coords0, coords1 = self.initialize_flow(image1)
-
-        if flow_init is not None:
-            coords1 = coords1 + flow_init
-
-        flow_predictions = []
-        for itr in range(iters):
-            coords1 = coords1.detach()
-            corr = corr_fn(coords1) # index correlation volume
-
-            flow = coords1 - coords0
-            with autocast(enabled=self.args.mixed_precision):
-                net, up_mask, delta_flow = self.update_block(net, inp, corr, flow)
-
-            # F(t+1) = F(t) + \Delta(t)
-            coords1 = coords1 + delta_flow
-
-            # upsample predictions
-            if up_mask is None:
-                flow_up = upflow8(coords1 - coords0)
-            else:
-                flow_up = self.upsample_flow(coords1 - coords0, up_mask)
-            
-            flow_predictions.append(flow_up)
-            
-        return flow_predictions
-
-class FastHomographyAlign(nn.Module):
-    def __init__(self, points = 20, with_sift = True):
-        super().__init__()
-
-        # create Matcher object
-        self.matcher = cv2.DescriptorMatcher_create(cv2.DESCRIPTOR_MATCHER_BRUTEFORCE_HAMMING)
-
-        # Init SIFT detector
-        self.with_sift = with_sift
-        self.sift = cv2.xfeatures2d.SIFT_create()
-
-        # at least 10 points
-        self.min_match_count = 25 
-
-        # FLANN matcher; KD tree
-        index_params = dict(algorithm = 1, trees = 5)
-        search_params = dict(checks = 50)
-        self.flann = cv2.FlannBasedMatcher(index_params, search_params)
-
-    def align_frame_sift(self, target, neighbor):
-        """ use sift to match images """
-
-        assert isinstance(target, torch.Tensor) and isinstance(neighbor, torch.Tensor), (
-            print("input target and neighbor must be torch.Tensor !")
-        )
-
-        b, c, h, w = target.size()
-
-        for i in range(b):
-            target_img = target[i,:,:,:].clone().cpu().contiguous().detach().permute(1,2,0)
-            neighbor_img = neighbor[i,:,:,:].clone().cpu().contiguous().detach().permute(1,2,0)
-
-            # get numpy array
-            target_img = target_img.numpy()
-            neighbor_img = neighbor_img.numpy()
-
-            # compute homography and align
-            target_img_gray = cv2.cvtColor(target_img, cv2.COLOR_RGB2GRAY)
-            neighbor_img_gray = cv2.cvtColor(neighbor_img, cv2.COLOR_RGB2GRAY)
-            
-            target_img_gray = cv2.normalize(target_img_gray, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
-            neighbor_img_gray = cv2.normalize(neighbor_img_gray, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
-
-            # find the keypoints and descriptors with sift
-
-            neighbor_kps, neighbor_des = self.sift.detectAndCompute(neighbor_img_gray, None)
-            target_kps, target_des = self.sift.detectAndCompute(target_img_gray, None)
-
-            # use knn algorithm
-            matches = None
-            try:
-                matches = self.flann.knnMatch(neighbor_des, target_des, k = 2)
-            except:
-                print("Matches error occured !")
-
-            if matches == None: continue
-
-            # remove error matches
-            good = []
-            for m, n in matches:
-                if m.distance <= 0.4 * n.distance:
-                    good.append(m)
-            
-            if len(good) > self.min_match_count:
-                src_pts = np.float32([neighbor_kps[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
-                dst_pts = np.float32([target_kps[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
-                
-                # compute homography matrix
-                homography_matrix, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-                
-                # warp neighbor image
-                try:
-                    align_neighbor = cv2.warpPerspective(neighbor_img, homography_matrix, (w, h))
-                except:
-                    print("Error occured in warp function !") 
-                    continue
-
-                # transfer numpy array to tensor
-                neighbor_align = align_neighbor.astype(np.float32) / 255.
-                neighbor_align_tensor = torch.from_numpy(neighbor_align).permute(2, 0, 1).cuda()
-                neighbor[i, :, :, :] = neighbor_align_tensor
-            
-            else:
-                continue
-
-        return neighbor
-
-    def forward(self, x):
-        assert isinstance(x, torch.Tensor), (
-            print("input x must be torch.Tensor !")
-        )
-
-        b, t, c, h, w = x.size()
-        center_index = c // 2
-
-        center_frame = x[:, center_index, :, :, :]  # Get center frame
-
-        for i in range(t):
-            if i != center_index and abs(center_index-i) == 1: # abs(center_index - i) == 1
-                neighbor = x[:, i, :, :, :].clone()
-
-                if self.with_sift:
-                    x[:, i, :, :, :] = self.align_frame_sift(center_frame, neighbor)
-                
-        return x
-
 class DftFeatureExtractor(nn.Module):
     def __init__(self, mid_channels=64, num_blocks=20, with_gauss=False, guass_key = 2.0):
         super().__init__()
-        self.conv_first = nn.Conv2d(3, mid_channels, 3, 1, 1, bias=True)
+        self.conv_first = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=True)
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
 
         main = []
@@ -917,7 +743,7 @@ class DftFeatureExtractor(nn.Module):
                 ResidualBlockNoBN, 6, mid_channels=mid_channels))
         self.main = nn.Sequential(*main)
 
-        self.conv_middle = nn.Conv2d(2*mid_channels, mid_channels, 3, 1, 1, bias=True)
+        self.conv_middle = nn.Conv2d(2 * mid_channels, mid_channels, 3, 1, 1, bias=True)
 
         feature_extractor = []
         feature_extractor.append(
@@ -955,8 +781,8 @@ class DftFeatureExtractor(nn.Module):
             DFT feature maps of lr image.              
         """
         assert isinstance(lr, torch.Tensor), (
-            print("lr must be Torch.Tensor!")
-        )
+            print("lr must be Torch.Tensor!"))
+
         b, c, h, w = lr.size()
 
         x = self.conv_first(lr) # [b, mid_channels, h, w]
@@ -965,15 +791,15 @@ class DftFeatureExtractor(nn.Module):
         x_proj = (2 * math.pi * x)
 
         if self.with_gauss:
-            B = torch.randn((h,h)).cuda()
+            gauss_b = torch.randn((h,h)).to(lr.device)
 
             # modulate the gauss mat
             gauss_key =  torch.ones((b,1,h,h)) * self.guass_key
-            gauss_key = gauss_key.cuda()
+            gauss_key = gauss_key.to(lr.device)
             gauss_key = self.modulation(gauss_key)
-            B = B * gauss_key
+            gauss_b = gauss_b * gauss_key
 
-            x_proj = torch.matmul(B, x_proj)
+            x_proj = torch.matmul(gauss_b, x_proj)
             
         dft_feature = torch.cat((torch.sin(x_proj), torch.cos(x_proj)),dim=1)  # [b, 2 * mid_channels, h, w]
 

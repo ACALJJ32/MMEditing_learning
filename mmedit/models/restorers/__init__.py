@@ -9,8 +9,9 @@ from .liif import LIIF
 from .srgan import SRGAN
 from .tdan import TDAN
 from .ttsr import TTSR
+from .basicvsr_v2 import BasicVSRV2
 
 __all__ = [
     'BasicRestorer', 'SRGAN', 'ESRGAN', 'EDVR', 'LIIF', 'BasicVSR', 'TTSR',
-    'GLEAN', 'TDAN', 'DIC'
+    'GLEAN', 'TDAN', 'DIC', 'BasicVSRV2'
 ]

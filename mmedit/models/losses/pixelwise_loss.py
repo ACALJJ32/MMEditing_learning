@@ -276,11 +276,10 @@ class PCFLoss(nn.Module):
             weight (Tensor, optional): of shape (N, C, H, W). Element-wise
                 weights. Default: None.
         """
-        b, t, c, h, w = pred.size()
-        pred_reshape = pred.contiguous().clone().view(-1, c, h, w)
-        target_reshape = target.contiguous().clone().view(-1, c, h, w)
 
         # L1
+        hrs, gts = pred[0], pred[1]
+
         charbonnier_loss_l1 = charbonnier_loss(
             pred,
             target,
@@ -289,44 +288,6 @@ class PCFLoss(nn.Module):
             reduction=self.reduction,
             sample_wise=self.sample_wise)
 
-        # focal_loss_l1 = focal_loss(pred, target)
+        l1 = self.loss_weight * charbonnier_loss_l1
 
-        # L2
-        pred_l2 = F.interpolate(pred_reshape, (h // 2, w // 2), mode='bilinear', align_corners=False)
-        target_l2 = F.interpolate(target_reshape, (h // 2, w // 2), mode='bilinear', align_corners=False)
-        
-        charbonnier_loss_l2 = charbonnier_loss(
-            pred_l2,
-            target_l2,
-            weight,
-            eps=self.eps,
-            reduction=self.reduction,
-            sample_wise=self.sample_wise)
-        # focal_loss_l2 = focal_loss(pred_l2, target_l2)
-
-        # L3
-        pred_l3 = F.interpolate(pred_reshape, (h // 4, w // 4), mode='bilinear', align_corners=False)
-        target_l3 = F.interpolate(target_reshape, (h // 4, w // 4), mode='bilinear', align_corners=False)
-        
-        charbonnier_loss_l3 = charbonnier_loss(
-            pred_l3,
-            target_l3,
-            weight,
-            eps=self.eps,
-            reduction=self.reduction,
-            sample_wise=self.sample_wise)
-        # focal_loss_l3 = focal_loss(pred_l3, target_l3)
-
-
-        # l1 = self.loss_weight * charbonnier_loss_l1 + self.loss_weight * 0.20 * focal_loss_l1
-        # l2 = self.loss_weight * charbonnier_loss_l2 + self.loss_weight * 0.20 * focal_loss_l2
-        # l3 = self.loss_weight * charbonnier_loss_l3 + self.loss_weight * 0.20 * focal_loss_l3
-
-        l1 = self.loss_weight * charbonnier_loss_l1 + self.loss_weight
-        l2 = self.loss_weight * charbonnier_loss_l2 + self.loss_weight 
-        l3 = self.loss_weight * charbonnier_loss_l3 + self.loss_weight
-
-
-        # return l1 + 0.10 * l2 + 0.10 * l3
-        # return l1 + 0.10 * l2 
-        return l1 + l2 + l3
+        return l1 

@@ -1,5 +1,3 @@
-from os import replace
-from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -83,7 +81,7 @@ class BasicVSRGaussModulation(nn.Module):
 
         # DFT feature extractor
         self.with_dft_feature_extractor = with_dft
-        self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=15, with_gauss=True)
+        self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=10, with_gauss=True)
 
         self.dft_fusion_backward = nn.Conv2d(2 * mid_channels + 3, mid_channels + 3, 3, 1, 1, bias=True)
         self.dft_fusion_forward = nn.Conv2d(3 * mid_channels + 3, 2 * mid_channels + 3, 3, 1, 1, bias=True)
@@ -283,7 +281,7 @@ class BasicVSRGaussModulation(nn.Module):
         feats_refill = self.compute_refill_features(lrs, keyframe_idx)   # dict; feats_refill[0] shape: [b, mid_channels, h, w]
 
         # compute dft feature
-        dft_features = [self.dft_feature_extractor(feats_refill[i]) for i in range(t)]
+        dft_features = [self.dft_feature_extractor(feats_refill[i]) for i in keyframe_idx]
 
         # backward-time propgation
         outputs = []
@@ -305,7 +303,7 @@ class BasicVSRGaussModulation(nn.Module):
             feat_prop = torch.cat([lr_curr, feat_prop], dim=1)          # [b, mid_channel + 3, h, w]
 
             # DFT feature extractor
-            if self.with_dft_feature_extractor:
+            if self.with_dft_feature_extractor and i in keyframe_idx:
                 dft_feature = dft_features[i]                           # [b, mid_channels, h, w]
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)  # [b, 2 * mid_channles + 3, h, w]
                 feat_prop = self.dft_fusion_backward(feat_prop)  
@@ -337,7 +335,7 @@ class BasicVSRGaussModulation(nn.Module):
             feat_prop = torch.cat([lr_curr, outputs[i], feat_prop], dim=1)  # [b, 2 * mid_channels + 3, h, w]
 
             # DFT feature extractor
-            if self.with_dft_feature_extractor:
+            if self.with_dft_feature_extractor and i in keyframe_idx:
                 dft_feature = dft_features[i]
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)
                 feat_prop = self.dft_fusion_forward(feat_prop)
@@ -352,7 +350,7 @@ class BasicVSRGaussModulation(nn.Module):
             out += base                                  # [b, c, h, w]
             outputs[i] = out
 
-        return torch.stack(outputs, dim=1)[:, :, :, :4 * h_input, :4 * w_input]
+        return torch.stack(outputs, dim=1)[:, :, :, :4 * h_input, :4 * w_input], base
 
     def init_weights(self, pretrained=None, strict=True):
         """Init weights for models.
@@ -733,7 +731,7 @@ class EDVRFeatureExtractor(nn.Module):
         return feat
 
 class DftFeatureExtractor(nn.Module):
-    def __init__(self, mid_channels=64, num_blocks=20, with_gauss=False, guass_key = 1.0):
+    def __init__(self, mid_channels=64, num_blocks=20, with_gauss=False, guass_key = 2.0):
         super().__init__()
         self.conv_first = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=True)
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
