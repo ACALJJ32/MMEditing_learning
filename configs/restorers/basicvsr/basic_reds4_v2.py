@@ -7,7 +7,7 @@ model = dict(
         type='BasicVSRGaussModulationV2',
         mid_channels=64,
         num_blocks=30,
-        keyframe_stride=1,
+        keyframe_stride=5,
         padding=2,
         spynet_pretrained='https://download.openmmlab.com/mmediting/restorers/'
         'basicvsr/spynet_20210409-c6c1bd09.pth',

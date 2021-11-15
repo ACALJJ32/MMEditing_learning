@@ -281,7 +281,7 @@ class PCFLoss(nn.Module):
         hrs, gts = pred[0], pred[1]
 
         charbonnier_loss_l1 = charbonnier_loss(
-            pred,
+            hrs,
             target,
             weight,
             eps=self.eps,

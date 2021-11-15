@@ -3,10 +3,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from mmcv.cnn import ConvModule
 from mmcv.runner import load_checkpoint
+from torch.nn.parameter import Parameter
 
 from mmedit.models.common import (PixelShufflePack, ResidualBlockNoBN,
                                   flow_warp, make_layer)
-from mmedit.models.registry import BACKBONES, MODELS
+from mmedit.models.registry import BACKBONES
 from mmedit.utils import get_root_logger
 from .edvr_net import PCDAlignment, TSAFusion
 import math
@@ -85,25 +86,10 @@ class BasicVSRGaussModulationV2(nn.Module):
 
         self.dft_fusion_backward = nn.Conv2d(2 * mid_channels + 3, mid_channels + 3, 3, 1, 1, bias=True)
         self.dft_fusion_forward = nn.Conv2d(3 * mid_channels + 3, 2 * mid_channels + 3, 3, 1, 1, bias=True)
-
-        # Pyramid attention module
-        self.with_pyramid_attention = False
-
-        # embedding layer
-        self.embedding_refill_l1 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
-        self.embedding_refill_l2 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
-        self.embedding_refill_l3 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
-
-        self.embedding_prop_l1 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
-        self.embedding_prop_l2 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
-        self.embedding_prop_l3 = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)
         
         # pooling layer
         self.max_pool = nn.MaxPool2d(3, stride=2, padding=1)
         self.avg_pool = nn.AvgPool2d(3, stride=2, padding=1)
-
-        self.level2_att_fusion = nn.Conv2d(2 * mid_channels, mid_channels, 3, 1, 1, bias=False)
-        self.level3_att_fusion = nn.Conv2d(2 * mid_channels, mid_channels, 3, 1, 1, bias=False)
 
     def spatial_padding(self, lrs):
         """ Apply pdding spatially.
@@ -199,57 +185,6 @@ class BasicVSRGaussModulationV2(nn.Module):
 
         return flows_forward, flows_backward
 
-    def pyramid_attention(self, prop, refill):
-        """Compute attention map between feature prop and refill.
-
-        Args:
-            prop (tensor): Input prop feature map with shape (n, c, h, w)
-            refill (tensor): Input refill feature map with shape (n, c, h, w)
-
-        Return:
-            Tensor: Output attention map with shape (n, c, h, w).
-        """
-        b, c, h, w = prop.size()
-
-        # L1 level attention
-        prop_l1 = self.lrelu(self.embedding_prop_l1(prop))
-        refill_l1 = self.lrelu(self.embedding_refill_l1(refill))
-        att_l1 = F.softmax(torch.cat((prop_l1, refill_l1), dim=1), dim=1) # [b, 2 * mid_channels, h, w]
-
-        # L2 level attention
-        prop_level2 = F.interpolate(prop, (h // 2, w // 2), mode='bilinear', align_corners=False)
-        refill_level2 = F.interpolate(refill, (h // 2, w // 2), mode='bilinear', align_corners=False)
-        prop_l2 = self.lrelu(self.embedding_prop_l2(prop_level2))
-        refill_l2 = self.lrelu(self.embedding_refill_l2(refill_level2))
-
-        prop_l2_max, prop_l2_avg = self.max_pool(prop_l2), self.avg_pool(prop_l2)
-        refill_l2_max, refill_l2_avg = self.max_pool(refill_l2), self.avg_pool(refill_l2)
-
-        prop_l2 = self.level2_att_fusion(torch.cat((prop_l2_max, prop_l2_avg), dim=1))
-        refill_l2 = self.level2_att_fusion(torch.cat((refill_l2_max, refill_l2_avg), dim=1))
-
-        att_l2 = F.softmax(torch.cat((prop_l2, refill_l2), dim=1), dim=1)
-        att_l2 = F.interpolate(att_l2, (h, w), mode='bilinear', align_corners=False)
-
-        # L3 level attention
-        prop_level3 = F.interpolate(prop, (h // 4, w // 4), mode='bilinear', align_corners=False)
-        refill_level3 = F.interpolate(refill, (h //4, w // 4), mode='bilinear', align_corners=False)
-        prop_l3 = self.lrelu(self.embedding_prop_l3(prop_level3))
-        refill_l3 = self.lrelu(self.embedding_refill_l3(refill_level3))
-
-        prop_l3_max, prop_l3_avg = self.max_pool(prop_l3), self.avg_pool(prop_l3)
-        refill_l3_max, refill_l3_avg = self.max_pool(refill_l3), self.avg_pool(refill_l3)
-
-        prop_l3 = self.level3_att_fusion(torch.cat((prop_l3_max, prop_l3_avg), dim=1))
-        refill_l3 = self.level3_att_fusion(torch.cat((refill_l3_max, refill_l3_avg), dim=1))
-
-        att_l3 = F.softmax(torch.cat((prop_l3, refill_l3), dim=1), dim=1) # [b, 2 * mid_channels, h, w]
-        att_l3 = F.interpolate(att_l3, (h, w), mode='bilinear', align_corners=False)
-
-        feat_prop = prop * (att_l1[:, :c, :, :] + att_l2[:, :c, :, :] +  att_l3[:, :c, :, :]) * 2
-
-        return feat_prop
-
     def forward(self, lrs, gts):
         """Forward function for BasicVSR.
 
@@ -279,10 +214,7 @@ class BasicVSRGaussModulationV2(nn.Module):
 
         # compute optical flow and compute features for information-refill  
         flows_forward, flows_backward = self.compute_flow(lrs)  
-        feats_refill = self.compute_refill_features(lrs, keyframe_idx)   # dict; feats_refill[0] shape: [b, mid_channels, h, w]
-
-        # compute dft feature
-        dft_features = [self.dft_feature_extractor(feats_refill[i]) for i in keyframe_idx]
+        feats_refill = self.compute_refill_features(lrs, keyframe_idx) # dict; feats_refill[0] shape: [b, mid_channels, h, w]
 
         # backward-time propgation
         outputs = []
@@ -294,10 +226,6 @@ class BasicVSRGaussModulationV2(nn.Module):
                 feat_prop = flow_warp(feat_prop, flow.permute(0, 2, 3, 1))
 
             if i in keyframe_idx:
-                # Pyramid attention module
-                if self.with_pyramid_attention:
-                    feat_prop = self.pyramid_attention(feat_prop.clone(), feats_refill[i].clone())
-
                 feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)  # [b, 2 * mid_channles, h, w]
                 feat_prop = self.backward_fusion(feat_prop)                 # [b, mid_channels, h, w]
 
@@ -305,7 +233,7 @@ class BasicVSRGaussModulationV2(nn.Module):
 
             # DFT feature extractor
             if self.with_dft_feature_extractor and i in keyframe_idx:
-                dft_feature = dft_features[i]                           # [b, mid_channels, h, w]
+                dft_feature = self.dft_feature_extractor(feats_refill[i])   # [b, mid_channels, h, w]
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)  # [b, 2 * mid_channles + 3, h, w]
                 feat_prop = self.dft_fusion_backward(feat_prop)  
              
@@ -326,10 +254,6 @@ class BasicVSRGaussModulationV2(nn.Module):
                 feat_prop = flow_warp(feat_prop, flow.permute(0, 2, 3, 1))
 
             if i in keyframe_idx:  # information-refill
-                # Pyramid attention module
-                if self.with_pyramid_attention:
-                    feat_prop = self.pyramid_attention(feat_prop.clone(), feats_refill[i].clone())
-
                 feat_prop = torch.cat([feat_prop, feats_refill[i]], dim=1)
                 feat_prop = self.forward_fusion(feat_prop)
 
@@ -337,7 +261,7 @@ class BasicVSRGaussModulationV2(nn.Module):
 
             # DFT feature extractor
             if self.with_dft_feature_extractor and i in keyframe_idx:
-                dft_feature = dft_features[i]
+                dft_feature = self.dft_feature_extractor(feats_refill[i])
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)
                 feat_prop = self.dft_fusion_forward(feat_prop)
 
@@ -638,8 +562,7 @@ class EDVRFeatureExtractor(nn.Module):
                  num_blocks_reconstruction=10,
                  center_frame_idx=2,
                  with_tsa=True,
-                 pretrained=None,
-                 with_homography_align=False):
+                 pretrained=None):
 
         super().__init__()
 
@@ -807,3 +730,89 @@ class DftFeatureExtractor(nn.Module):
         dft_feature = self.feature_extractor(dft_feature)
 
         return dft_feature
+
+
+class CRACV2(nn.Conv2d):
+    def __init__(self, in_channels=64, mid_channels=64, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, bias=True):
+        super(CRACV2, self).__init__(in_channels, mid_channels, kernel_size, stride, padding, dilation, groups, bias)
+       
+        self.stride = stride
+        self.padding= padding
+        self.dilation = dilation
+        self.groups = groups
+        self.mid_channel = mid_channels
+        self.kernel_size = kernel_size
+
+        # weight & bias for content-gated-convolution
+        self.weight_conv = Parameter(torch.zeros(mid_channels, in_channels, kernel_size, kernel_size), requires_grad=True)
+        self.bias_conv = Parameter(torch.zeros(mid_channels), requires_grad=True)
+       
+        # init weight_conv layer
+        nn.init.kaiming_normal_(self.weight_conv)
+
+        # target spatial size of the pooling layer
+        self.avg_pool = nn.AdaptiveAvgPool2d((kernel_size, kernel_size))
+
+        # the dimension of latent representation
+        self.num_latent = int((kernel_size * kernel_size) / 2 + 1)
+
+        # the context encoding module
+        self.context_encoding = nn.Linear(kernel_size*kernel_size, self.num_latent, False)
+        self.context_encoding_bn = nn.BatchNorm1d(in_channels)
+
+        # relu function
+        self.relu = nn.ReLU(inplace=True)
+
+        # the number of groups in the channel interaction module
+        if in_channels // 16: self.g = 16
+        else: self.g = in_channels
+       
+        # the channel interacting module
+        self.channel_interact = nn.Linear(self.g, mid_channels // (in_channels // self.g), bias=False)
+        self.channel_interact_bn = nn.BatchNorm1d(mid_channels)
+        self.channel_interact_bn2 = nn.BatchNorm1d(in_channels)
+
+        # the gate decoding module (spatial interaction)
+        self.gate_decode = nn.Linear(self.num_latent, kernel_size * kernel_size, False)
+        self.gate_decode2 = nn.Linear(self.num_latent, kernel_size * kernel_size, False)
+
+        # used to prepare the input feature map to patches
+        self.unfold = nn.Unfold(kernel_size, dilation, padding, stride)
+
+        # sigmoid function
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        b, c, h, w = x.size()              
+        weight = self.weight_conv
+
+        # allocate global information and context-encoding module
+        out = self.context_encoding(self.avg_pool(x).view(b, c, -1))          
+
+        # use different bn for following two branches
+        context_encoding2 = out.clone()                                  
+        out = self.relu(self.context_encoding_bn(out))                  
+
+        # gate decoding branch 1 (spatial interaction)
+        out = self.gate_decode(out)                      # out: batch x n_feat x 9 (5 --> 9 = 3x3)
+        print(out.size())
+
+        # channel interacting module
+        oc = self.channel_interact(self.relu(self.channel_interact_bn2(context_encoding2).view(b, c//self.g, self.g, -1).transpose(2,3))).transpose(2,3).contiguous()
+        oc = self.relu(self.channel_interact_bn(oc.view(b, self.mid_channel, -1)))                       # oc: batch x n_feat x 5 (after grouped linear layer)
+
+        # gate decoding branch 2 (spatial interaction)
+        oc = self.gate_decode2(oc)                       # oc: batch x n_feat x 9 (5 --> 9 = 3x3)
+       
+        # produce gate (equation (4) in the CRAN paper)
+        out = self.sigmoid(out.view(b, 1, c, self.kernel_size, self.kernel_size)
+            + oc.view(b, self.mid_channel, 1, self.kernel_size, self.kernel_size))  # out: batch x out_channel x in_channel x kernel_size x kernel_size (same dimension as conv2d weight)
+
+        # unfolding input feature map to patches
+        x_unfold = self.unfold(x)
+        b, _, l = x_unfold.size()
+
+        # gating
+        out = (out * weight.unsqueeze(0)).view(b, self.mid_channel, -1)
+
+        return torch.matmul(out, x_unfold).view(-1, c, h, w)

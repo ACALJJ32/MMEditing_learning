@@ -80,7 +80,7 @@ class BasicVSRV2(BasicRestorer):
         outputs = dict(
             losses=losses,
             num_samples=len(gt.data),
-            results=dict(lq=lq.cpu(), gt=gt.cpu(), output=output.cpu()))
+            results=dict(lq=lq.cpu(), gt=gt.cpu(), output=(i.cpu() for i in output)))
         return outputs
 
     def train_step(self, data_batch, optimizer):
@@ -173,7 +173,7 @@ class BasicVSRV2(BasicRestorer):
             dict: Output results.
         """
         with torch.no_grad():
-            output = self.generator(lq)
+            output, _ = self.generator(lq, gt)
 
         # If the GT is an image (i.e. the center frame), the output sequence is
         # turned to an image.
