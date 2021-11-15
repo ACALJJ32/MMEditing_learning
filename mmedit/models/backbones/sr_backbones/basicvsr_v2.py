@@ -595,8 +595,10 @@ class EDVRFeatureExtractor(nn.Module):
                 num_frames=num_frames,
                 center_frame_idx=self.center_frame_idx)
         else:
-            self.fusion = nn.Conv2d(num_frames * mid_channels, mid_channels, 1,
-                                    1)
+            self.fusion = nn.Conv2d(num_frames * mid_channels, mid_channels, 1, 1)
+
+        # CRAC module
+        # self.crac_module = CRACV2(in_channels=mid_channels, mid_channels=mid_channels)
 
         # activation function
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
@@ -621,9 +623,13 @@ class EDVRFeatureExtractor(nn.Module):
         # extract LR features
         # L1
         l1_feat = self.lrelu(self.conv_first(x.view(-1, c, h, w)))
+        # l1_feat = self.crac_module(l1_feat)
+        
         l1_feat = self.feature_extraction(l1_feat)
+
         # L2
         l2_feat = self.feat_l2_conv2(self.feat_l2_conv1(l1_feat))
+
         # L3
         l3_feat = self.feat_l3_conv2(self.feat_l3_conv1(l2_feat))
 
@@ -730,7 +736,6 @@ class DftFeatureExtractor(nn.Module):
         dft_feature = self.feature_extractor(dft_feature)
 
         return dft_feature
-
 
 class CRACV2(nn.Conv2d):
     def __init__(self, in_channels=64, mid_channels=64, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, bias=True):
