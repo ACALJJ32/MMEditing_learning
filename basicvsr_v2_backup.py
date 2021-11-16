@@ -235,8 +235,7 @@ class BasicVSRGaussModulationV2(nn.Module):
 
             # DFT feature extractor
             if self.with_dft_feature_extractor and i in keyframe_idx:
-                # dft_feature = self.crac_module(self.dft_feature_extractor(feats_refill[i]))   # [b, mid_channels, h, w]
-                dft_feature = self.dft_feature_extractor(feats_refill[i])
+                dft_feature = self.dft_feature_extractor(feats_refill[i])   # [b, mid_channels, h, w]
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)  # [b, 2 * mid_channles + 3, h, w]
                 feat_prop = self.dft_fusion_backward(feat_prop)  
              
@@ -264,7 +263,6 @@ class BasicVSRGaussModulationV2(nn.Module):
 
             # DFT feature extractor
             if self.with_dft_feature_extractor and i in keyframe_idx:
-                # dft_feature = self.crac_module(self.dft_feature_extractor(feats_refill[i]))
                 dft_feature = self.dft_feature_extractor(feats_refill[i])
                 feat_prop = torch.cat((dft_feature, feat_prop), dim=1)
                 feat_prop = self.dft_fusion_forward(feat_prop)
@@ -665,7 +663,7 @@ class EDVRFeatureExtractor(nn.Module):
         return feat
 
 class DftFeatureExtractor(nn.Module):
-    def __init__(self, mid_channels=64, num_blocks=5, with_gauss=False, guass_key = 3.0):
+    def __init__(self, mid_channels=64, num_blocks=20, with_gauss=False, guass_key = 2.0):
         super().__init__()
         self.conv_first = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=True)
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
@@ -804,17 +802,18 @@ class CRACV2(nn.Conv2d):
 
         # gate decoding branch 1 (spatial interaction)
         out = self.gate_decode(out)                      # out: batch x n_feat x 9 (5 --> 9 = 3x3)
+        print(out.size())
 
         # channel interacting module
         oc = self.channel_interact(self.relu(self.channel_interact_bn2(context_encoding2).view(b, c//self.g, self.g, -1).transpose(2,3))).transpose(2,3).contiguous()
         oc = self.relu(self.channel_interact_bn(oc.view(b, self.mid_channel, -1)))                       # oc: batch x n_feat x 5 (after grouped linear layer)
 
         # gate decoding branch 2 (spatial interaction)
-        oc = self.gate_decode2(oc)                    
+        oc = self.gate_decode2(oc)                       # oc: batch x n_feat x 9 (5 --> 9 = 3x3)
        
         # produce gate (equation (4) in the CRAN paper)
         out = self.sigmoid(out.view(b, 1, c, self.kernel_size, self.kernel_size)
-            + oc.view(b, self.mid_channel, 1, self.kernel_size, self.kernel_size))
+            + oc.view(b, self.mid_channel, 1, self.kernel_size, self.kernel_size))  # out: batch x out_channel x in_channel x kernel_size x kernel_size (same dimension as conv2d weight)
 
         # unfolding input feature map to patches
         x_unfold = self.unfold(x)

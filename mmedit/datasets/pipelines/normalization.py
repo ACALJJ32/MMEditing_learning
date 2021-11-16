@@ -4,7 +4,6 @@ import numpy as np
 
 from ..registry import PIPELINES
 
-
 @PIPELINES.register_module()
 class Normalize:
     """Normalize images with the given mean and std value.
@@ -75,6 +74,37 @@ class RescaleToZeroOne:
 
     Args:
         keys (Sequence[str]): The images to be transformed.
+    """
+
+    def __init__(self, keys):
+        self.keys = keys
+
+    def __call__(self, results):
+        """Call function.
+
+        Args:
+            results (dict): A dict containing the necessary information and
+                data for augmentation.
+
+        Returns:
+            dict: A dict containing the processed data and information.
+        """
+        for key in self.keys:
+            if isinstance(results[key], list):
+                results[key] = [
+                    v.astype(np.float32) / 255. for v in results[key]
+                ]
+            else:
+                results[key] = results[key].astype(np.float32) / 255.
+        return results
+
+    def __repr__(self):
+        return self.__class__.__name__ + f'(keys={self.keys})'
+
+
+class SIFTREDSDataset:
+    """
+        SIFT Implement.
     """
 
     def __init__(self, keys):

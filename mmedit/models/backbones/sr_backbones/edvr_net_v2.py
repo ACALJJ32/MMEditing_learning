@@ -13,7 +13,6 @@ from mmedit.models.common import (PixelShufflePack, ResidualBlockNoBN,
 from mmedit.models.registry import BACKBONES
 from mmedit.utils import get_root_logger
 
-
 class ModulatedDCNPack(ModulatedDeformConv2d):
     """Modulated Deformable Convolutional Pack.
 
@@ -58,7 +57,6 @@ class ModulatedDCNPack(ModulatedDeformConv2d):
                                        self.stride, self.padding,
                                        self.dilation, self.groups,
                                        self.deform_groups)
-
 
 class PCDAlignment(nn.Module):
     """Alignment module using Pyramid, Cascading and Deformable convolution
@@ -188,7 +186,6 @@ class PCDAlignment(nn.Module):
         feat = self.lrelu(self.cas_dcnpack(feat, offset))
         return feat
 
-
 class TSAFusion(nn.Module):
     """Temporal Spatial Attention (TSA) fusion module. It is used in EDVRNet.
 
@@ -297,14 +294,14 @@ class TSAFusion(nn.Module):
         feat = feat * attn * 2 + attn_add
         return feat
 
-@BACKBONES.register_module()
-class EDVRNet(nn.Module):
-    """EDVR network structure for video super-resolution.
+class EDVRFeatureExtractor(nn.Module):
+    """EDVR feature extractor for information-refill in IconVSR.
 
-    Now only support X4 upsampling factor.
+    We use EDVR-M in IconVSR. To adopt pretrained models, please
+    specify "pretrained".
+
     Paper:
     EDVR: Video Restoration with Enhanced Deformable Convolutional Networks.
-
     Args:
         in_channels (int): Channel number of inputs.
         out_channels (int): Channel number of outputs.
@@ -319,19 +316,23 @@ class EDVRNet(nn.Module):
         center_frame_idx (int): The index of center frame. Frame counting from
             0. Default: 2.
         with_tsa (bool): Whether to use TSA module. Default: True.
+        pretrained (str): The pretrained model path. Default: None.
     """
 
     def __init__(self,
-                 in_channels,
-                 out_channels,
+                 in_channels=3,
+                 out_channel=3,
                  mid_channels=64,
                  num_frames=5,
                  deform_groups=8,
                  num_blocks_extraction=5,
                  num_blocks_reconstruction=10,
                  center_frame_idx=2,
-                 with_tsa=True):
+                 with_tsa=True,
+                 pretrained=None):
+
         super().__init__()
+
         self.center_frame_idx = center_frame_idx
         self.with_tsa = with_tsa
         act_cfg = dict(type='LeakyReLU', negative_slope=0.1)
@@ -361,49 +362,41 @@ class EDVRNet(nn.Module):
                 num_frames=num_frames,
                 center_frame_idx=self.center_frame_idx)
         else:
-            self.fusion = nn.Conv2d(num_frames * mid_channels, mid_channels, 1,
-                                    1)
+            self.fusion = nn.Conv2d(num_frames * mid_channels, mid_channels, 1, 1)
 
-        # reconstruction
-        self.reconstruction = make_layer(
-            ResidualBlockNoBN,
-            num_blocks_reconstruction,
-            mid_channels=mid_channels)
-        # upsample
-        self.upsample1 = PixelShufflePack(
-            mid_channels, mid_channels, 2, upsample_kernel=3)
-        self.upsample2 = PixelShufflePack(
-            mid_channels, 64, 2, upsample_kernel=3)
-        # we fix the output channels in the last few layers to 64.
-        self.conv_hr = nn.Conv2d(64, 64, 3, 1, 1)
-        self.conv_last = nn.Conv2d(64, out_channels, 3, 1, 1)
-        self.img_upsample = nn.Upsample(
-            scale_factor=4, mode='bilinear', align_corners=False)
+        # CRAC module
+        # self.crac_module = CRACV2(in_channels=mid_channels, mid_channels=mid_channels)
+
         # activation function
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
 
+        if isinstance(pretrained, str):
+            logger = get_root_logger()
+            load_checkpoint(self, pretrained, strict=True, logger=logger)
+        elif pretrained is not None:
+            raise TypeError(f'"pretrained" must be a str or None. '
+                            f'But received {type(pretrained)}.')
+
     def forward(self, x):
-        """Forward function for EDVRNet.
-
+        """Forward function for EDVRFeatureExtractor.
         Args:
-            x (Tensor): Input tensor with shape (n, t, c, h, w).
-
+            x (Tensor): Input tensor with shape (n, t, 3, h, w).
         Returns:
-            Tensor: SR center frame with shape (n, c, h, w).
+            Tensor: Intermediate feature with shape (n, mid_channels, h, w).
         """
-        n, t, c, h, w = x.size()
-        assert h % 4 == 0 and w % 4 == 0, (
-            'The height and width of inputs should be a multiple of 4, '
-            f'but got {h} and {w}.')
 
-        x_center = x[:, self.center_frame_idx, :, :, :].contiguous()
+        n, t, c, h, w = x.size()
 
         # extract LR features
         # L1
         l1_feat = self.lrelu(self.conv_first(x.view(-1, c, h, w)))
+        # l1_feat = self.crac_module(l1_feat)
+        
         l1_feat = self.feature_extraction(l1_feat)
+
         # L2
         l2_feat = self.feat_l2_conv2(self.feat_l2_conv1(l1_feat))
+
         # L3
         l3_feat = self.feat_l3_conv2(self.feat_l3_conv1(l2_feat))
 
@@ -432,48 +425,7 @@ class EDVRNet(nn.Module):
             aligned_feat = aligned_feat.view(n, -1, h, w)
             feat = self.fusion(aligned_feat)
 
-        # reconstruction
-        out = self.reconstruction(feat)
-        out = self.lrelu(self.upsample1(out))
-        out = self.lrelu(self.upsample2(out))
-        out = self.lrelu(self.conv_hr(out))
-        out = self.conv_last(out)
-        base = self.img_upsample(x_center)
-        out += base
-        return out
-
-    def init_weights(self, pretrained=None, strict=True):
-        """Init weights for models.
-
-        Args:
-            pretrained (str, optional): Path for pretrained weights. If given
-                None, pretrained weights will not be loaded. Defaults to None.
-            strict (boo, optional): Whether strictly load the pretrained model.
-                Defaults to True.
-        """
-        if isinstance(pretrained, str):
-            logger = get_root_logger()
-            load_checkpoint(self, pretrained, strict=strict, logger=logger)
-        elif pretrained is None:
-            if self.with_tsa:
-                for module in [
-                        self.fusion.feat_fusion, self.fusion.spatial_attn1,
-                        self.fusion.spatial_attn2, self.fusion.spatial_attn3,
-                        self.fusion.spatial_attn4, self.fusion.spatial_attn_l1,
-                        self.fusion.spatial_attn_l2,
-                        self.fusion.spatial_attn_l3,
-                        self.fusion.spatial_attn_add1
-                ]:
-                    kaiming_init(
-                        module.conv,
-                        a=0.1,
-                        mode='fan_out',
-                        nonlinearity='leaky_relu',
-                        bias=0,
-                        distribution='uniform')
-        else:
-            raise TypeError(f'"pretrained" must be a str or None. '
-                            f'But received {type(pretrained)}.')
+        return feat
 
 class DftFeatureExtractor(nn.Module):
     def __init__(self, mid_channels=64, num_blocks=20, with_gauss=False, guass_key = 2.0):
@@ -637,8 +589,68 @@ class CRACV2(nn.Conv2d):
 
         return torch.matmul(out, x_unfold).view(-1, c, h, w)
 
-class EDVRV2(nn.Module):
-    def __init__(self, mid_channels = 64):
+@BACKBONES.register_module()
+class EDVRV2Net(nn.Module):
+    def __init__(self,
+                 mid_channels=64,
+                 num_blocks=30,
+                 padding=2,
+                 edvr_pretrained=None,
+                 with_dft=False):
         super().__init__()
 
-        self.feature_extrator = EDVRNet()
+        self.padding = padding
+
+        # edvr feature extractor
+        self.edvr_feature_extractor = EDVRFeatureExtractor(num_frames=padding * 2 + 1, center_frame_idx=padding,
+            pretrained=edvr_pretrained)
+
+        # upsample
+        self.fusion = nn.Conv2d(
+            mid_channels * 2, mid_channels, 1, 1, 0, bias=True)
+        self.upsample1 = PixelShufflePack(
+            mid_channels, mid_channels, 2, upsample_kernel=3)
+        self.upsample2 = PixelShufflePack(
+            mid_channels, 64, 2, upsample_kernel=3)
+        self.conv_hr = nn.Conv2d(64, 64, 3, 1, 1)
+        self.conv_last = nn.Conv2d(64, 3, 3, 1, 1)
+        self.img_upsample = nn.Upsample(
+            scale_factor=4, mode='bilinear', align_corners=False)
+
+        # activation function
+        self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
+    
+    def init_weights(self, pretrained=None, strict=True):
+        """Init weights for models.
+
+        Args:
+            pretrained (str, optional): Path for pretrained weights. If given
+                None, pretrained weights will not be loaded. Defaults: None.
+            strict (boo, optional): Whether strictly load the pretrained model.
+                Defaults to True.
+        """
+        if isinstance(pretrained, str):
+            logger = get_root_logger()
+            load_checkpoint(self, pretrained, strict=strict, logger=logger)
+        elif pretrained is not None:
+            raise TypeError(f'"pretrained" must be a str or None. '
+                            f'But received {type(pretrained)}.')
+    
+    def forward(self, lrs):
+        b, t, c, h, w = lrs.size()
+
+        lr_curr = lrs[:, t // 2, :, :, :].clone()  # center frame
+        
+        feat = self.edvr_feature_extractor(lrs)  # [b, mid_channel, h, w]
+
+        out = self.lrelu(self.upsample1(feat))
+        out = self.lrelu(self.upsample2(out))
+        out = self.lrelu(self.conv_hr(out))
+        out = self.conv_last(out)
+        
+        base = self.img_upsample(lr_curr)
+        out += base                                  # [b, c, h, w]
+
+        return out
+
+        
