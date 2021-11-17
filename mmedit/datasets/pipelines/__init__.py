@@ -18,6 +18,7 @@ from .matting_aug import (CompositeFg, GenerateSeg, GenerateSoftSeg,
                           MergeFgAndBg, PerturbBg, TransformTrimap)
 from .normalization import Normalize, RescaleToZeroOne
 from .random_down_sampling import RandomDownSampling
+from .homography import HomographyWithSIFT
 
 __all__ = [
     'Collect', 'FormatTrimap', 'LoadImageFromFile', 'LoadMask',
@@ -32,5 +33,5 @@ __all__ = [
     'CropAroundFg', 'GetSpatialDiscountMask', 'RandomDownSampling',
     'GenerateTrimapWithDistTransform', 'TransformTrimap',
     'GenerateCoordinateAndCell', 'GenerateSegmentIndices', 'MirrorSequence',
-    'CropLike', 'GenerateHeatmap'
+    'CropLike', 'GenerateHeatmap', 'HomographyWithSIFT'
 ]

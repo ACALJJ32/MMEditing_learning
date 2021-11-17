@@ -32,6 +32,7 @@ train_pipeline = [
         io_backend='disk',
         key='gt',
         flag='unchanged'),
+    dict(type='HomographyWithSIFT', keys=['lq', 'gt'], ratio = 0.25),
     dict(type='RescaleToZeroOne', keys=['lq', 'gt']),
     dict(
         type='Normalize',
@@ -155,6 +156,6 @@ visual_config = None
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 work_dir = f'./work_dirs/{exp_name}'
-load_from = 'weight/edvr/edvrm_wotsa_x4_8x4_600k_reds_20200522-0570e567.pth'
+load_from = None
 resume_from = None
 workflow = [('train', 1)]
