@@ -1,0 +1,1 @@
+A base EDVR net , after training 50000 ==> PSNR: 29.2926

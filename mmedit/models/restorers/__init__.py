@@ -11,8 +11,9 @@ from .tdan import TDAN
 from .ttsr import TTSR
 from .basicvsr_v2 import BasicVSRV2
 from .edvr_v2 import EDVRV2
+from .edvr_v3 import EDVRV3
 
 __all__ = [
     'BasicRestorer', 'SRGAN', 'ESRGAN', 'EDVR', 'LIIF', 'BasicVSR', 'TTSR',
-    'GLEAN', 'TDAN', 'DIC', 'BasicVSRV2', 'EDVRV2'
+    'GLEAN', 'TDAN', 'DIC', 'BasicVSRV2', 'EDVRV2', 'EDVRV3'
 ]

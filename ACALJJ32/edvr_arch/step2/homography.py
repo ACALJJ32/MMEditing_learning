@@ -1,21 +1,10 @@
 import mmcv
 import numpy as np
 import cv2
-import random
+
 from ..registry import PIPELINES
 
-def padding(target, neighbor_align):
-    height, width, _ = target.shape
-
-    for i in range(height):
-        for j in range(width):
-            if sum(neighbor_align[i,j:]) == 0.0:
-                neighbor_align[i,j,:] = target[i,j,:]
-
-    return neighbor_align
-
-
-def sift(target, neighbor, min_match_count = 300):
+def sift(target, neighbor, min_match_count = 25):
     align_neighbor = neighbor.copy()
     sift_module = cv2.xfeatures2d.SIFT_create()
     
@@ -60,7 +49,6 @@ def sift(target, neighbor, min_match_count = 300):
         # warp neighbor image
         try:
             align_neighbor = cv2.warpPerspective(neighbor, homography_matrix, (width, height))
-            align_neighbor = padding(target, align_neighbor)
         except:
             return neighbor
 
@@ -73,9 +61,8 @@ class HomographyWithSIFT:
         SIFT Implement.
     """
 
-    def __init__(self, keys, ratio):
+    def __init__(self, keys):
         self.keys = keys
-        self.ratio = ratio
 
     def __call__(self, results):
         """Call function.
@@ -87,15 +74,14 @@ class HomographyWithSIFT:
         Returns:
             dict: A dict containing the processed data and information.
         """
-
         for key in self.keys:
             if isinstance(results[key], list):
                 for v in self.keys:
-                    if v == 'lq' and random.random() < self.ratio:
+                    if v == 'lq':
                         center_index = len(results[v]) // 2
                         center_frame = results[v][center_index].copy()
                         for idx, frame in enumerate(results[v]):
-                            if idx != center_index and abs(idx - center_index) == 1:
+                            if idx != center_index:
                                 results[v][idx] = sift(center_frame, frame)
                                     
         return results

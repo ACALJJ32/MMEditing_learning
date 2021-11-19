@@ -590,7 +590,7 @@ class CRACV2(nn.Conv2d):
         return torch.matmul(out, x_unfold).view(-1, c, h, w)
 
 @BACKBONES.register_module()
-class EDVRV2Net(nn.Module):
+class EDVRV3Net(nn.Module):
     def __init__(self,
                  mid_channels=64,
                  num_blocks=30,
@@ -604,6 +604,9 @@ class EDVRV2Net(nn.Module):
         # edvr feature extractor
         self.edvr_feature_extractor = EDVRFeatureExtractor(num_frames=padding * 2 + 1, center_frame_idx=padding,
             pretrained=edvr_pretrained)
+        
+        # dfr feature extractor
+        self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=10, with_gauss=True, guass_key=1.0)
 
         # upsample
         self.fusion = nn.Conv2d(
@@ -642,6 +645,9 @@ class EDVRV2Net(nn.Module):
         lr_curr = lrs[:, t // 2, :, :, :].clone()  # center frame
         
         feat = self.edvr_feature_extractor(lrs)  # [b, mid_channel, h, w]
+
+        # propogation
+        feat = self.dft_feature_extractor(feat)
 
         # upsample construct
         out = self.lrelu(self.upsample1(feat))

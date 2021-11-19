@@ -643,7 +643,6 @@ class EDVRV2Net(nn.Module):
         
         feat = self.edvr_feature_extractor(lrs)  # [b, mid_channel, h, w]
 
-        # upsample construct
         out = self.lrelu(self.upsample1(feat))
         out = self.lrelu(self.upsample2(out))
         out = self.lrelu(self.conv_hr(out))
