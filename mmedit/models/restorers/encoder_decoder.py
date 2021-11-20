@@ -1,16 +1,14 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import numbers
 import os.path as osp
-
 import mmcv
-
 from mmedit.core import tensor2img
 from ..registry import MODELS
 from .basic_restorer import BasicRestorer
 
 
 @MODELS.register_module()
-class EDVRV3(BasicRestorer):
+class EncoderDecoder(BasicRestorer):
     """EDVR model for video super-resolution.
 
     EDVR: Video Restoration with Enhanced Deformable Convolutional Networks.
@@ -32,7 +30,11 @@ class EDVRV3(BasicRestorer):
         super().__init__(generator, pixel_loss, train_cfg, test_cfg,
                          pretrained)
         self.with_tsa = generator.get('with_tsa', False)
+
+         # fix pre-trained networks
+        self.fix_iter = train_cfg.get('fix_iter', 0) if train_cfg else 0
         self.step_counter = 0  # count training steps
+        self.is_weight_fixed = False
 
     def train_step(self, data_batch, optimizer):
         """Train step.
@@ -44,20 +46,17 @@ class EDVRV3(BasicRestorer):
         Returns:
             dict: Returned output.
         """
-        if self.step_counter == 0 and self.with_tsa:
-            if self.train_cfg is None or (self.train_cfg is not None and
-                                          'tsa_iter' not in self.train_cfg):
-                raise KeyError(
-                    'In TSA mode, train_cfg must contain "tsa_iter".')
-            # only train TSA module at the beginging if with TSA module
-            for k, v in self.generator.named_parameters():
-                if 'fusion' not in k:
-                    v.requires_grad = False
+        
+        if self.step_counter < self.fix_iter:
+            if not self.is_weight_fixed:
+                self.is_weight_fixed = True
+                for k, v in self.generator.named_parameters():
+                    if 'edvr_feature_extractor' in k:
+                        v.requires_grad_(False)
 
-        if self.with_tsa and (self.step_counter == self.train_cfg.tsa_iter):
+        elif self.step_counter == self.fix_iter:
             # train all the parameters
-            for v in self.generator.parameters():
-                v.requires_grad = True
+            self.generator.requires_grad_(True)
 
         outputs = self(**data_batch, test_mode=False)
         loss, log_vars = self.parse_losses(outputs.pop('losses'))

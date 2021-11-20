@@ -13,7 +13,7 @@ model = dict(
         with_dft=False),
     pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='sum'))
 # model training and testing settings
-train_cfg = dict(tsa_iter=50000)
+train_cfg = dict(fix_iter=5000)
 test_cfg = dict(metrics=['PSNR'], crop_border=0)
 
 # dataset settings
@@ -32,7 +32,7 @@ train_pipeline = [
         io_backend='disk',
         key='gt',
         flag='unchanged'),
-    dict(type='HomographyWithSIFT', keys=['lq', 'gt'], ratio = 0.25),
+    # dict(type='HomographyWithSIFT', keys=['lq', 'gt'], ratio = 0.25),
     dict(type='RescaleToZeroOne', keys=['lq', 'gt']),
     dict(
         type='Normalize',
@@ -136,18 +136,20 @@ total_iters = 600000
 lr_config = dict(
     policy='CosineRestart',
     by_epoch=False,
-    periods=[50000, 100000, 150000, 150000, 150000],
-    restart_weights=[1, 1, 1, 1, 1],
+    # periods=[50000, 100000, 150000, 150000, 150000],
+    periods=[600000],
+    # restart_weights=[1, 1, 1, 1, 1],
+    restart_weights=[1],
     min_lr=1e-7)
 
 checkpoint_config = dict(interval=5000, save_optimizer=True, by_epoch=False)
 # remove gpu_collect=True in non distributed training
-evaluation = dict(interval=50000, save_image=False, gpu_collect=True)
+evaluation = dict(interval=5000, save_image=False, gpu_collect=True)
 log_config = dict(
     interval=100,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=False),
-        dict(type='TensorboardLoggerHook'),
+        # dict(type='TensorboardLoggerHook'),
         # dict(type='PaviLoggerHook', init_kwargs=dict(project='mmedit-sr'))
     ])
 visual_config = None
