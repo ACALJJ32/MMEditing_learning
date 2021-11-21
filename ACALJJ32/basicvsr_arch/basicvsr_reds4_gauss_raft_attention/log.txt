@@ -1,0 +1,70 @@
+In this part: We DFT features, 
+		stride(edvr) = 1,
+		Long short feature fusion,
+		charbonnier and facol loss, pyramid.
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+code:
+
+def pyramid_attention(self, prop, refill):
+        """Compute attention map between feature prop and refill.
+
+        Args:
+            prop (tensor): Input prop feature map with shape (n, c, h, w)
+            refill (tensor): Input refill feature map with shape (n, c, h, w)
+
+        Return:
+            Tensor: Output attention map with shape (n, c, h, w).
+        """
+        b, c, h, w = prop.size()
+
+        # L1 level attention
+        prop_l1 = self.lrelu(self.embedding_prop_l1(prop))
+        refill_l1 = self.lrelu(self.embedding_refill_l1(refill))
+        att_l1 = F.softmax(torch.cat((prop_l1, refill_l1), dim=1), dim=1) # [b, 2 * mid_channels, h, w]
+
+        # L2 level attention
+        prop_level2 = F.interpolate(prop, (h // 2, w // 2), mode='bilinear', align_corners=False)
+        refill_level2 = F.interpolate(refill, (h // 2, w // 2), mode='bilinear', align_corners=False)
+        prop_l2 = self.lrelu(self.embedding_prop_l2(prop_level2))
+        refill_l2 = self.lrelu(self.embedding_refill_l2(refill_level2))
+
+        prop_l2_max, prop_l2_avg = self.max_pool(prop_l2), self.avg_pool(prop_l2)
+        refill_l2_max, refill_l2_avg = self.max_pool(refill_l2), self.avg_pool(refill_l2)
+
+        prop_l2 = self.level2_att_fusion(torch.cat((prop_l2_max, prop_l2_avg), dim=1))
+        refill_l2 = self.level2_att_fusion(torch.cat((refill_l2_max, refill_l2_avg), dim=1))
+
+        att_l2 = F.softmax(torch.cat((prop_l2, refill_l2), dim=1), dim=1)
+        att_l2 = F.interpolate(att_l2, (h, w), mode='bilinear', align_corners=False)
+
+        # L3 level attention
+        prop_level3 = F.interpolate(prop, (h // 4, w // 4), mode='bilinear', align_corners=False)
+        refill_level3 = F.interpolate(refill, (h //4, w // 4), mode='bilinear', align_corners=False)
+        prop_l3 = self.lrelu(self.embedding_prop_l3(prop_level3))
+        refill_l3 = self.lrelu(self.embedding_refill_l3(refill_level3))
+
+        prop_l3_max, prop_l3_avg = self.max_pool(prop_l3), self.avg_pool(prop_l3)
+        refill_l3_max, refill_l3_avg = self.max_pool(refill_l3), self.avg_pool(refill_l3)
+
+        prop_l3 = self.level3_att_fusion(torch.cat((prop_l3_max, prop_l3_avg), dim=1))
+        refill_l3 = self.level3_att_fusion(torch.cat((refill_l3_max, refill_l3_avg), dim=1))
+
+        att_l3 = F.softmax(torch.cat((prop_l3, refill_l3), dim=1), dim=1) # [b, 2 * mid_channels, h, w]
+        att_l3 = F.interpolate(att_l3, (h, w), mode='bilinear', align_corners=False)
+
+        feat_prop = prop * (att_l1[:, :c, :, :] + att_l2[:, :c, :, :] +  att_l3[:, :c, :, :]) * 2
+
+        return feat_prop

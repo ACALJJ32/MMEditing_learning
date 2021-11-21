@@ -1,0 +1,4 @@
+In this part: We DFT features, 
+		stride(edvr) = 1,
+		// Long short feature fusion, (False) 
+		charbonnier loss.

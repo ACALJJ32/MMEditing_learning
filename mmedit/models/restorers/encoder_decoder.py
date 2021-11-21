@@ -26,6 +26,7 @@ class EncoderDecoder(BasicRestorer):
                  pixel_loss,
                  train_cfg=None,
                  test_cfg=None,
+                 edvr_pretrained=None,
                  pretrained=None):
         super().__init__(generator, pixel_loss, train_cfg, test_cfg,
                          pretrained)
@@ -47,16 +48,22 @@ class EncoderDecoder(BasicRestorer):
             dict: Returned output.
         """
         
-        if self.step_counter < self.fix_iter:
-            if not self.is_weight_fixed:
-                self.is_weight_fixed = True
-                for k, v in self.generator.named_parameters():
-                    if 'edvr_feature_extractor' in k:
-                        v.requires_grad_(False)
+        for k, v in self.generator.named_parameters():
+            if 'edvr_feature_extractor' in k:
+                v.requires_grad_(False)
+                
+        # ==================  fixed EDVR net at first 5000 iter. ================== #
+        # if self.step_counter < self.fix_iter:
+        #     if not self.is_weight_fixed:
+        #         self.is_weight_fixed = True
+        #         for k, v in self.generator.named_parameters():
+        #             if 'edvr_feature_extractor' in k:
+        #                 v.requires_grad_(False)
 
-        elif self.step_counter == self.fix_iter:
-            # train all the parameters
-            self.generator.requires_grad_(True)
+        # elif self.step_counter == self.fix_iter:
+        #     # train all the parameters
+        #     self.generator.requires_grad_(True)
+        # ========================================================================= #
 
         outputs = self(**data_batch, test_mode=False)
         loss, log_vars = self.parse_losses(outputs.pop('losses'))
@@ -69,6 +76,26 @@ class EncoderDecoder(BasicRestorer):
         self.step_counter += 1
 
         outputs.update({'log_vars': log_vars})
+        return outputs
+
+    def forward_train(self, lq, gt):
+        """Training forward function.
+
+        Args:
+            lq (Tensor): LQ Tensor with shape (n, c, h, w).
+            gt (Tensor): GT Tensor with shape (n, c, h, w).
+
+        Returns:
+            Tensor: Output tensor.
+        """
+        losses = dict()
+        output = self.generator(lq, gt)  # multi stream loss compute implement
+        loss_pix = self.pixel_loss(output, gt)
+        losses['loss_pix'] = loss_pix
+        outputs = dict(
+            losses=losses,
+            num_samples=len(gt.data),
+            results=dict(lq=lq.cpu(), gt=gt.cpu(), output=(i.cpu() for i in output)))
         return outputs
 
     def forward_dummy(self, imgs):
@@ -103,7 +130,7 @@ class EncoderDecoder(BasicRestorer):
         Returns:
             dict: Output results.
         """
-        output = self.generator(lq)
+        output = self.generator(lq, gt)
         if self.test_cfg is not None and self.test_cfg.get('metrics', None):
             assert gt is not None, (
                 'evaluation with metrics must have gt images.')

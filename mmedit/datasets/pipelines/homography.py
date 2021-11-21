@@ -6,7 +6,6 @@ from ..registry import PIPELINES
 
 def padding(target, neighbor_align):
     height, width, _ = target.shape
-
     for i in range(height):
         for j in range(width):
             if sum(neighbor_align[i,j:]) == 0.0:
@@ -14,6 +13,13 @@ def padding(target, neighbor_align):
 
     return neighbor_align
 
+def check_black(img):
+    height, width, _ = img.shape
+    for i in range(height):
+        for j in range(width):
+            if sum(img[i, j, :]) == 0.0:
+                return False
+    return True
 
 def sift(target, neighbor, min_match_count = 300):
     align_neighbor = neighbor.copy()
@@ -65,7 +71,6 @@ def sift(target, neighbor, min_match_count = 300):
             return neighbor
 
     return align_neighbor
-
 
 @PIPELINES.register_module()
 class HomographyWithSIFT:

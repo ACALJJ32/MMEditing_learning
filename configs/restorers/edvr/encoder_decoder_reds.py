@@ -1,16 +1,15 @@
-exp_name = 'edvrm_v2_x4_g8_600k_reds'
+exp_name = 'encoder_decoder_x4_600k_reds'
 
 # model settings
 model = dict(
-    type='EDVRV3',
+    type='EncoderDecoder',
     generator=dict(
-        type='EDVRV3Net',
+        type='EncoderDecoderNet',
         mid_channels=64,
-        num_blocks=30,
         padding=2,
+        decoder_pretrained=None,
         edvr_pretrained='https://download.openmmlab.com/mmediting/restorers/'
-        'iconvsr/edvrm_reds_20210413-3867262f.pth',
-        with_dft=False),
+        'iconvsr/edvrm_reds_20210413-3867262f.pth'),
     pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='sum'))
 # model training and testing settings
 train_cfg = dict(fix_iter=5000)
@@ -32,7 +31,7 @@ train_pipeline = [
         io_backend='disk',
         key='gt',
         flag='unchanged'),
-    dict(type='HomographyWithSIFT', keys=['lq', 'gt'], ratio = 0.25),
+    # dict(type='HomographyWithSIFT', keys=['lq', 'gt'], ratio = 0.25),
     dict(type='RescaleToZeroOne', keys=['lq', 'gt']),
     dict(
         type='Normalize',
@@ -136,8 +135,8 @@ total_iters = 600000
 lr_config = dict(
     policy='CosineRestart',
     by_epoch=False,
-    periods=[50000, 100000, 150000, 150000, 150000],
-    restart_weights=[1, 1, 1, 1, 1],
+    periods=[60000],
+    restart_weights=[1],
     min_lr=1e-7)
 
 checkpoint_config = dict(interval=5000, save_optimizer=True, by_epoch=False)

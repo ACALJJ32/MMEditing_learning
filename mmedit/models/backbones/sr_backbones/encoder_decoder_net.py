@@ -7,10 +7,12 @@ from mmcv.runner import load_checkpoint
 from torch.nn.modules.utils import _pair
 from torch.nn.parameter import Parameter
 import math
+import torch.nn.functional as F
 
 from mmedit.models.common import (PixelShufflePack, ResidualBlockNoBN,
                                   make_layer)
 from mmedit.models.registry import BACKBONES
+from mmedit.models.restorers.encoder_decoder import EncoderDecoder
 from mmedit.utils import get_root_logger
 
 class ModulatedDCNPack(ModulatedDeformConv2d):
@@ -427,9 +429,9 @@ class EDVRFeatureExtractor(nn.Module):
 
         return feat
 
-class CRACV2(nn.Conv2d):
+class CRANV2(nn.Conv2d):
     def __init__(self, in_channels=64, mid_channels=64, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, bias=True):
-        super(CRACV2, self).__init__(in_channels, mid_channels, kernel_size, stride, padding, dilation, groups, bias)
+        super(CRANV2, self).__init__(in_channels, mid_channels, kernel_size, stride, padding, dilation, groups, bias)
        
         self.stride = stride
         self.padding= padding
@@ -496,11 +498,11 @@ class CRACV2(nn.Conv2d):
         oc = self.relu(self.channel_interact_bn(oc.view(b, self.mid_channel, -1)))                       # oc: batch x n_feat x 5 (after grouped linear layer)
 
         # gate decoding branch 2 (spatial interaction)
-        oc = self.gate_decode2(oc)                       # oc: batch x n_feat x 9 (5 --> 9 = 3x3)
+        oc = self.gate_decode2(oc)                    
        
         # produce gate (equation (4) in the CRAN paper)
         out = self.sigmoid(out.view(b, 1, c, self.kernel_size, self.kernel_size)
-            + oc.view(b, self.mid_channel, 1, self.kernel_size, self.kernel_size))  # out: batch x out_channel x in_channel x kernel_size x kernel_size (same dimension as conv2d weight)
+            + oc.view(b, self.mid_channel, 1, self.kernel_size, self.kernel_size))
 
         # unfolding input feature map to patches
         x_unfold = self.unfold(x)
@@ -511,22 +513,25 @@ class CRACV2(nn.Conv2d):
 
         return torch.matmul(out, x_unfold).view(-1, c, h, w)
 
-class CRACResidualBlockNoBN(nn.Module):
+class CRANResidualBlockNoBN(nn.Module):
     def __init__(self, mid_channels=64):
         super().__init__()
         self.residual_block = ResidualBlockNoBN(mid_channels=mid_channels)
-        self.crac_block = CRACV2(mid_channels=mid_channels)
+        self.cran_block = CRANV2(mid_channels=mid_channels)
 
-        # activation function
-        self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
+        self.fusion = nn.Conv2d(mid_channels * 2, mid_channels, 3, 1, 1)
     
     def forward(self, feat):
-        feat = self.lrelu(self.crac_block(feat))
-        feat = self.lrelu(self.residual_block(feat))
-        return feat
+        cran_feat = self.cran_block(feat)
+
+        feat = torch.cat([cran_feat, feat], dim=1)
+        feat = self.fusion(feat)
+        
+        feat_prop = self.residual_block(feat)
+        return feat_prop
 
 class DftFeatureExtractor(nn.Module):
-    def __init__(self, mid_channels=64, num_blocks=10, with_gauss=True, guass_key = 2.0, modulation_blocks=1):
+    def __init__(self, mid_channels=64, num_blocks=5, with_gauss=True, guass_key = 1.0):
         super().__init__()
         self.conv_first = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=True)
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
@@ -534,24 +539,25 @@ class DftFeatureExtractor(nn.Module):
         main = []
         main.append(
             make_layer(
-                CRACResidualBlockNoBN, num_blocks=num_blocks, mid_channels=mid_channels))
+                ResidualBlockNoBN, num_blocks=num_blocks, mid_channels=mid_channels))  # modified
         self.main = nn.Sequential(*main)
 
-        self.conv_middle = nn.Conv2d(2 * mid_channels, mid_channels, 3, 1, 1, bias=True)
+        self.conv_middle = nn.Conv2d(3 * mid_channels, mid_channels, 3, 1, 1, bias=True)
 
         last_feature_extractor = []
         last_feature_extractor.append(
             make_layer(
-                CRACResidualBlockNoBN, num_blocks=num_blocks, mid_channels=mid_channels))
+                ResidualBlockNoBN, num_blocks=num_blocks, mid_channels=mid_channels))  # modified
         self.last_feature_extractor = nn.Sequential(*last_feature_extractor)
+
+        # fusion
+        self.fusion = nn.Conv2d(mid_channels * 2, mid_channels, 3, 1, 1)
 
         self.conv_last = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=True)
 
         # Gauss 
         self.with_gauss = with_gauss
         self.guass_key = guass_key
-
-        self.modulation_blocks = modulation_blocks
 
         modulation = [
             nn.Conv2d(1, mid_channels, 1,1,0, bias=False),
@@ -564,7 +570,7 @@ class DftFeatureExtractor(nn.Module):
 
         modulation.append(
             make_layer(
-                ResidualBlockNoBN, 10, mid_channels=mid_channels))
+                ResidualBlockNoBN, 4, mid_channels=mid_channels))
         
         self.modulation = nn.Sequential(*modulation)
     
@@ -581,20 +587,12 @@ class DftFeatureExtractor(nn.Module):
 
         x_proj = torch.matmul(gauss_b, x_proj)
 
-        feat = torch.cat((torch.sin(x_proj), torch.cos(x_proj)), dim=1)  # [b, 2 * mid_channels, h, w]
+        feat = torch.cat((torch.sin(x_proj), torch.cos(x_proj), feat), dim=1)  # [b, 2 * mid_channels, h, w]
         feat = self.conv_middle(feat)
 
         return feat
            
     def forward(self, lr):
-        """
-        Args
-            lr: low resolution images. 
-
-        Returns  
-            DFT feature maps of lr image.              
-        """
-
         b, c, h, w = lr.size()
 
         feat = self.conv_first(lr) # [b, mid_channels, h, w]
@@ -603,31 +601,102 @@ class DftFeatureExtractor(nn.Module):
         x_proj = (2 * math.pi * feat)
 
         if self.with_gauss:
-            for i in range(self.modulation_blocks):
-                feat = self.modulation_block(feat, x_proj)
+            feat_prop = self.modulation_block(feat, x_proj)
+            feat = torch.cat([feat_prop, feat], dim=1)
+            feat = self.fusion(feat)
 
         feat = self.last_feature_extractor(feat)
 
         return feat
 
+class Encoder(nn.Module):
+    def __init__(self,
+                in_channels=3,
+                out_channel=64,
+                mid_channels=64,
+                pretrained=None):
+        super().__init__()
+        self.conv_first = nn.Conv2d(in_channels, mid_channels, 3, 1, 1)
+
+        # dft encoder blocks
+        self.dft_feature_extractor1 = DftFeatureExtractor(mid_channels=mid_channels)
+
+        # fusion module
+        self.fusion1 = nn.Conv2d(mid_channels * 2, mid_channels, 3, 1, 1)
+        self.fusion2 = nn.Conv2d(mid_channels * 2, mid_channels, 4, 2, 1)
+        self.fusion3 = nn.Conv2d(mid_channels, mid_channels, 4, 2, 1)
+        self.fusion4 = nn.Conv2d(mid_channels * 2 + 3, mid_channels, 3, 1, 1)
+
+        # downsample
+        self.img_downsample = nn.Upsample(
+            scale_factor=0.25, mode='bilinear', align_corners=False)
+        
+        if isinstance(pretrained, str):
+                logger = get_root_logger()
+                load_checkpoint(self, pretrained, strict=True, logger=logger)
+        elif pretrained is not None:
+            raise TypeError(f'"pretrained" must be a str or None. '
+                            f'But received {type(pretrained)}.')
+    
+    def forward(self, lrs, gts, lr_feat):
+
+        feat = self.conv_first(gts)
+
+        dft_feat = self.dft_feature_extractor1(feat)
+        feat = torch.cat([feat, dft_feat], dim=1)
+        feat = self.fusion1(feat)
+
+        feat = torch.cat([feat, dft_feat], dim=1)
+        feat = self.fusion2(feat) 
+        feat = self.fusion3(feat)  
+
+        base = self.img_downsample(gts)
+
+        feat = torch.cat([lr_feat, base, feat], dim=1)
+        feat = self.fusion4(feat)
+
+        return feat
+
+class Decoder(nn.Module):
+    def __init__(self,
+                mid_channels=64,
+                pretrained=None):
+        super().__init__()
+        # dft decoder blocks
+        self.dft_feature_extractor1 = DftFeatureExtractor(mid_channels=mid_channels)
+
+        # fusion module
+        self.fusion1 = nn.Conv2d(mid_channels * 2, mid_channels, 3, 1, 1)
+    
+        if isinstance(pretrained, str):
+                logger = get_root_logger()
+                load_checkpoint(self, pretrained, strict=True, logger=logger)
+        elif pretrained is not None:
+            raise TypeError(f'"pretrained" must be a str or None. '
+                            f'But received {type(pretrained)}.')
+    
+    def forward(self, feat):
+        dft_feat = self.dft_feature_extractor1(feat)
+
+        feat = torch.cat([dft_feat, feat],dim=1)
+        feat = self.fusion1(feat)
+
+        return feat
+        
 @BACKBONES.register_module()
-class EcoderDecoderNet(nn.Module):
+class EncoderDecoderNet(nn.Module):
     def __init__(self,
                  mid_channels=64,
-                 num_blocks=30,
                  padding=2,
-                 edvr_pretrained=None,
-                 with_dft=False):
+                 decoder_pretrained=None,
+                 edvr_pretrained=None):
         super().__init__()
 
+        self.encoder = Encoder(in_channels=3, out_channel=64, mid_channels=64)
+        self.decoder = Decoder(mid_channels=mid_channels,pretrained=decoder_pretrained)
         self.padding = padding
 
-        # edvr feature extractor
-        self.edvr_feature_extractor = EDVRFeatureExtractor(num_frames=padding * 2 + 1, center_frame_idx=padding,
-            pretrained=edvr_pretrained)
-        
-        # dfr feature extractor
-        self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=10, with_gauss=True, guass_key=1.0)
+        self.edvr_feature_extractor = EDVRFeatureExtractor(pretrained=edvr_pretrained)
 
         # upsample
         self.fusion = nn.Conv2d(
@@ -640,6 +709,10 @@ class EcoderDecoderNet(nn.Module):
         self.conv_last = nn.Conv2d(64, 3, 3, 1, 1)
         self.img_upsample = nn.Upsample(
             scale_factor=4, mode='bilinear', align_corners=False)
+        
+        # dft fusion module
+        self.dft_fusion_module1 = nn.Conv2d(2 * mid_channels + 3, mid_channels, 3, 1, 1, bias=True)
+        self.dft_fusion_module2 = nn.Conv2d(2 * mid_channels + 3, mid_channels, 3, 1, 1, bias=True)
 
         # activation function
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
@@ -660,26 +733,26 @@ class EcoderDecoderNet(nn.Module):
             raise TypeError(f'"pretrained" must be a str or None. '
                             f'But received {type(pretrained)}.')
     
-    def forward(self, lrs):
+    def forward(self, lrs, gts):
         b, t, c, h, w = lrs.size()
-
         lr_curr = lrs[:, t // 2, :, :, :].clone()  # center frame
-        
-        feat = self.edvr_feature_extractor(lrs)  # [b, mid_channel, h, w]
 
-        # propogation  
-        # TODO
-        feat = self.dft_feature_extractor(feat)
+        # edvr feature
+        lr_feat = self.edvr_feature_extractor(lrs)
+
+        # encoder propagation
+        gt_feat = self.encoder(lrs, gts, lr_feat)
+
+        # decoder propagation
+        feat = self.decoder(gt_feat)
 
         # upsample construct
         out = self.lrelu(self.upsample1(feat))
         out = self.lrelu(self.upsample2(out))
         out = self.lrelu(self.conv_hr(out))
         out = self.conv_last(out)
-        
+
         base = self.img_upsample(lr_curr)
         out += base                                  # [b, c, h, w]
 
         return out
-
-        

@@ -49,16 +49,22 @@ class EDVRV2(BasicRestorer):
             dict: Returned output.
         """
         
-        if self.step_counter < self.fix_iter:
-            if not self.is_weight_fixed:
-                self.is_weight_fixed = True
-                for k, v in self.generator.named_parameters():
-                    if 'edvr_feature_extractor' in k:
-                        v.requires_grad_(False)
+        for k, v in self.generator.named_parameters():
+            if 'edvr_feature_extractor' in k:
+                v.requires_grad_(False)
+                
+        # ==================  fixed EDVR net at first 5000 iter. ================== #
+        # if self.step_counter < self.fix_iter:
+        #     if not self.is_weight_fixed:
+        #         self.is_weight_fixed = True
+        #         for k, v in self.generator.named_parameters():
+        #             if 'edvr_feature_extractor' in k:
+        #                 v.requires_grad_(False)
 
-        elif self.step_counter == self.fix_iter:
-            # train all the parameters
-            self.generator.requires_grad_(True)
+        # elif self.step_counter == self.fix_iter:
+        #     # train all the parameters
+        #     self.generator.requires_grad_(True)
+        # ========================================================================= #
 
         outputs = self(**data_batch, test_mode=False)
         loss, log_vars = self.parse_losses(outputs.pop('losses'))

@@ -427,9 +427,9 @@ class EDVRFeatureExtractor(nn.Module):
 
         return feat
 
-class CRACV2(nn.Conv2d):
+class CRANV2(nn.Conv2d):
     def __init__(self, in_channels=64, mid_channels=64, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, bias=True):
-        super(CRACV2, self).__init__(in_channels, mid_channels, kernel_size, stride, padding, dilation, groups, bias)
+        super(CRANV2, self).__init__(in_channels, mid_channels, kernel_size, stride, padding, dilation, groups, bias)
        
         self.stride = stride
         self.padding= padding
@@ -486,23 +486,21 @@ class CRACV2(nn.Conv2d):
 
         # use different bn for following two branches
         context_encoding2 = out.clone()                                  
-        # out = self.relu(self.context_encoding_bn(out)) 
-        out = self.relu(out)                  
+        out = self.relu(self.context_encoding_bn(out))                  
 
         # gate decoding branch 1 (spatial interaction)
         out = self.gate_decode(out)                      # out: batch x n_feat x 9 (5 --> 9 = 3x3)
 
         # channel interacting module
-        # oc = self.channel_interact(self.relu(self.channel_interact_bn2(context_encoding2).view(b, c//self.g, self.g, -1).transpose(2,3))).transpose(2,3).contiguous()
-        oc = self.channel_interact(self.relu(context_encoding2).view(b, c//self.g, self.g, -1).transpose(2,3)).transpose(2,3).contiguous()
-        oc = self.relu(oc.view(b, self.mid_channel, -1))                   # oc: batch x n_feat x 5 (after grouped linear layer)
+        oc = self.channel_interact(self.relu(self.channel_interact_bn2(context_encoding2).view(b, c//self.g, self.g, -1).transpose(2,3))).transpose(2,3).contiguous()
+        oc = self.relu(self.channel_interact_bn(oc.view(b, self.mid_channel, -1)))                       # oc: batch x n_feat x 5 (after grouped linear layer)
 
         # gate decoding branch 2 (spatial interaction)
-        oc = self.gate_decode2(oc)                       # oc: batch x n_feat x 9 (5 --> 9 = 3x3)
+        oc = self.gate_decode2(oc)                    
        
         # produce gate (equation (4) in the CRAN paper)
         out = self.sigmoid(out.view(b, 1, c, self.kernel_size, self.kernel_size)
-            + oc.view(b, self.mid_channel, 1, self.kernel_size, self.kernel_size))  # out: batch x out_channel x in_channel x kernel_size x kernel_size (same dimension as conv2d weight)
+            + oc.view(b, self.mid_channel, 1, self.kernel_size, self.kernel_size))
 
         # unfolding input feature map to patches
         x_unfold = self.unfold(x)
@@ -513,22 +511,28 @@ class CRACV2(nn.Conv2d):
 
         return torch.matmul(out, x_unfold).view(-1, c, h, w)
 
-class CRACResidualBlockNoBN(nn.Module):
+class CRANResidualBlockNoBN(nn.Module):
     def __init__(self, mid_channels=64):
         super().__init__()
         self.residual_block = ResidualBlockNoBN(mid_channels=mid_channels)
-        self.crac_block = CRACV2(mid_channels=mid_channels)
+        self.cran_block = CRANV2(mid_channels=mid_channels)
+
+        self.fusion = nn.Conv2d(mid_channels * 2, mid_channels, 3, 1, 1)
 
         # activation function
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
     
     def forward(self, feat):
-        feat = self.crac_block(feat)
-        feat = self.lrelu(self.residual_block(feat))
-        return feat
+        cran_feat = self.cran_block(feat)
+
+        feat = torch.cat([cran_feat, feat], dim=1)
+        feat = self.fusion(feat)
+
+        feat_prop = self.lrelu(self.residual_block(feat))
+        return feat_prop
 
 class DftFeatureExtractor(nn.Module):
-    def __init__(self, mid_channels=64, num_blocks=10, with_gauss=True, guass_key = 2.0, modulation_blocks=1):
+    def __init__(self, mid_channels=64, num_blocks=10, with_gauss=True, guass_key = 2.0):
         super().__init__()
         self.conv_first = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=True)
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
@@ -539,12 +543,12 @@ class DftFeatureExtractor(nn.Module):
                 ResidualBlockNoBN, num_blocks=num_blocks, mid_channels=mid_channels))  # modified
         self.main = nn.Sequential(*main)
 
-        self.conv_middle = nn.Conv2d(2 * mid_channels, mid_channels, 3, 1, 1, bias=True)
+        self.conv_middle = nn.Conv2d(3 * mid_channels, mid_channels, 3, 1, 1, bias=True)
 
         last_feature_extractor = []
         last_feature_extractor.append(
             make_layer(
-                ResidualBlockNoBN, num_blocks=num_blocks, mid_channels=mid_channels))  # modified
+                ResidualBlockNoBN, num_blocks=num_blocks, mid_channels=mid_channels))  
         self.last_feature_extractor = nn.Sequential(*last_feature_extractor)
 
         self.conv_last = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=True)
@@ -552,8 +556,6 @@ class DftFeatureExtractor(nn.Module):
         # Gauss 
         self.with_gauss = with_gauss
         self.guass_key = guass_key
-
-        self.modulation_blocks = modulation_blocks
 
         modulation = [
             nn.Conv2d(1, mid_channels, 1,1,0, bias=False),
@@ -583,7 +585,7 @@ class DftFeatureExtractor(nn.Module):
 
         x_proj = torch.matmul(gauss_b, x_proj)
 
-        feat = torch.cat((torch.sin(x_proj), torch.cos(x_proj)), dim=1)  # [b, 2 * mid_channels, h, w]
+        feat = torch.cat((torch.sin(x_proj), torch.cos(x_proj), feat), dim=1)  # [b, 3 * mid_channels, h, w]
         feat = self.conv_middle(feat)
 
         return feat
@@ -597,8 +599,7 @@ class DftFeatureExtractor(nn.Module):
         x_proj = (2 * math.pi * feat)
 
         if self.with_gauss:
-            for i in range(self.modulation_blocks):
-                feat = self.modulation_block(feat, x_proj)
+            feat = self.modulation_block(feat, x_proj)
 
         feat = self.last_feature_extractor(feat)
 
@@ -669,7 +670,6 @@ class EDVRV2Net(nn.Module):
         feat = self.dft_fusion_module1(feat)
 
         # propogation
-        dft_feat = self.dft_feature_extractor(feat)
         feat = torch.cat([lr_curr, feat, dft_feat], dim=1)
         feat = self.dft_fusion_module2(feat)
 

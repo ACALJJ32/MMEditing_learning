@@ -1,0 +1,1 @@
+In this part: We only use DFT features, stride(edvr) = 1.
