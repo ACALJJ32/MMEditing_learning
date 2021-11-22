@@ -13,7 +13,7 @@ model = dict(
         with_dft=False),
     pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='sum'))
 # model training and testing settings
-train_cfg = dict(fix_iter=5000)
+train_cfg = dict(fix_iter=500000)
 test_cfg = dict(metrics=['PSNR'], crop_border=0)
 
 # dataset settings
@@ -41,7 +41,7 @@ train_pipeline = [
         std=[1, 1, 1],
         to_rgb=True),
     dict(type='PairedRandomCrop', gt_patch_size=256),
-    dict(type='HomographyWithSIFT', keys=['lq', 'gt'], ratio = 0.15),
+    # dict(type='HomographyWithSIFT', keys=['lq', 'gt'], ratio = 0.15),
     dict(
         type='Flip', keys=['lq', 'gt'], flip_ratio=0.5,
         direction='horizontal'),

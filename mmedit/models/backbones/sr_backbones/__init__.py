@@ -16,7 +16,7 @@ from .tof import TOFlow
 from .ttsr_net import TTSRNet
 from .basicvsr_gauss_attention import BasicVSRGaussModulation
 from .basicvsr_v2 import BasicVSRGaussModulationV2
-from .encoder_decoder_net import EncoderDecoderNet
+from .encoder_decoder_net import EncoderDecoderNet, Decoder
 from .edvr_net_v2 import EDVRV2Net
 
 __all__ = [
@@ -24,5 +24,5 @@ __all__ = [
     'BasicVSRNet', 'IconVSR', 'RDN', 'TTSRNet', 'GLEANStyleGANv2', 'TDANNet',
     'LIIFEDSR', 'LIIFRDN', 'BasicVSRPlusPlus', 'PCDAlignment', 'TSAFusion',
     'BasicVSRGaussModulation', 'BasicVSRGaussModulationV2', "EncoderDecoderNet",
-    'EDVRV2Net'
+    'EDVRV2Net', 'Decoder'
 ]

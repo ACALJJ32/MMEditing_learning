@@ -15,6 +15,44 @@ from mmedit.models.registry import BACKBONES
 from mmedit.models.restorers.encoder_decoder import EncoderDecoder
 from mmedit.utils import get_root_logger
 
+class ResidualBlocksWithInputConv(nn.Module):
+    """Residual blocks with a convolution in front.
+
+    Args:
+        in_channels (int): Number of input channels of the first conv.
+        out_channels (int): Number of channels of the residual blocks.
+            Default: 64.
+        num_blocks (int): Number of residual blocks. Default: 30.
+    """
+
+    def __init__(self, in_channels, out_channels=64, num_blocks=30):
+        super().__init__()
+
+        main = []
+
+        # a convolution used to match the channels of the residual blocks
+        main.append(nn.Conv2d(in_channels, out_channels, 3, 1, 1, bias=True))
+        main.append(nn.LeakyReLU(negative_slope=0.1, inplace=True))
+
+        # residual blocks
+        main.append(
+            make_layer(
+                ResidualBlockNoBN, num_blocks, mid_channels=out_channels))
+
+        self.main = nn.Sequential(*main)
+
+    def forward(self, feat):
+        """
+        Forward function for ResidualBlocksWithInputConv.
+
+        Args:
+            feat (Tensor): Input feature with shape (n, in_channels, h, w)
+
+        Returns:
+            Tensor: Output feature with shape (n, out_channels, h, w)
+        """
+        return self.main(feat)
+
 class ModulatedDCNPack(ModulatedDeformConv2d):
     """Modulated Deformable Convolutional Pack.
 
@@ -663,23 +701,27 @@ class Decoder(nn.Module):
                 pretrained=None):
         super().__init__()
         # dft decoder blocks
-        self.dft_feature_extractor1 = DftFeatureExtractor(mid_channels=mid_channels)
+        self.dft_feature_extractor = DftFeatureExtractor(mid_channels=mid_channels)
+
+        self.propagation_resblocks = ResidualBlocksWithInputConv(
+            2 * mid_channels, mid_channels, 30)
 
         # fusion module
-        self.fusion1 = nn.Conv2d(mid_channels * 2, mid_channels, 3, 1, 1)
+        self.fusion = nn.Conv2d(mid_channels * 2, mid_channels * 2, 3, 1, 1)
     
         if isinstance(pretrained, str):
-                logger = get_root_logger()
-                load_checkpoint(self, pretrained, strict=True, logger=logger)
+            logger = get_root_logger()
+            load_checkpoint(self, pretrained, strict=True, logger=logger)
         elif pretrained is not None:
             raise TypeError(f'"pretrained" must be a str or None. '
                             f'But received {type(pretrained)}.')
     
     def forward(self, feat):
-        dft_feat = self.dft_feature_extractor1(feat)
+        dft_feat = self.dft_feature_extractor(feat)
 
         feat = torch.cat([dft_feat, feat],dim=1)
-        feat = self.fusion1(feat)
+        feat = self.fusion(feat)
+        feat = self.propagation_resblocks(feat)
 
         return feat
         

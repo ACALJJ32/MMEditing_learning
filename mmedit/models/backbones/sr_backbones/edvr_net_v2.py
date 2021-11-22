@@ -12,6 +12,7 @@ from mmedit.models.common import (PixelShufflePack, ResidualBlockNoBN,
                                   make_layer)
 from mmedit.models.registry import BACKBONES
 from mmedit.utils import get_root_logger
+from .encoder_decoder_net import Decoder
 
 class ModulatedDCNPack(ModulatedDeformConv2d):
     """Modulated Deformable Convolutional Pack.
@@ -624,6 +625,9 @@ class EDVRV2Net(nn.Module):
         # dfr feature extractor
         self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=10, with_gauss=True, guass_key=1.0)
 
+        # decoder
+        self.dft_decoder = Decoder(mid_channels=mid_channels, pretrained='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/VSR/mmediting_cuc/decoder_iter_600000.pth')
+
         # upsample
         self.fusion = nn.Conv2d(
             mid_channels * 2, mid_channels, 1, 1, 0, bias=True)
@@ -639,6 +643,9 @@ class EDVRV2Net(nn.Module):
         # dft fusion module
         self.dft_fusion_module1 = nn.Conv2d(2 * mid_channels + 3, mid_channels, 3, 1, 1, bias=True)
         self.dft_fusion_module2 = nn.Conv2d(2 * mid_channels + 3, mid_channels, 3, 1, 1, bias=True)
+
+        # fusion
+        self.fusion = nn.Conv2d(mid_channels * 2, mid_channels, 3, 1, 1, bias=True)
 
         # activation function
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
@@ -672,6 +679,10 @@ class EDVRV2Net(nn.Module):
         # propogation
         feat = torch.cat([lr_curr, feat, dft_feat], dim=1)
         feat = self.dft_fusion_module2(feat)
+
+        feat_decode = self.dft_decoder(feat)
+        feat = torch.cat([feat, feat_decode], dim=1)
+        feat = self.fusion(feat)
 
         # upsample construct
         out = self.lrelu(self.upsample1(feat))
