@@ -570,9 +570,9 @@ class CRANResidualBlockNoBN(nn.Module):
         return feat_prop
 
 class DftFeatureExtractor(nn.Module):
-    def __init__(self, in_channels=3,mid_channels=64, num_blocks=5, with_gauss=True, guass_key = 1.0):
+    def __init__(self, mid_channels=64, num_blocks=5, with_gauss=True, guass_key = 1.0):
         super().__init__()
-        self.conv_first = nn.Conv2d(in_channels, mid_channels, 3, 1, 1, bias=True)
+        self.conv_first = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=True)
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
 
         main = []
@@ -650,37 +650,38 @@ class Encoder(nn.Module):
         self.dft_feature_extractor = DftFeatureExtractor(mid_channels=mid_channels)
 
         # residual blocks
-        self.propagation_resblocks = ResidualBlocksWithInputConv(
-            mid_channels + 3, mid_channels, 10)
+        self.fusion_last = ResidualBlocksWithInputConv(
+            2 * mid_channels + 6, mid_channels, 10)
 
         # fusion module
-        self.conv_last = nn.Conv2d(mid_channels * 2 + 3, mid_channels, 3, 1, 1)
-        
+        self.fusion_first = nn.Conv2d(mid_channels * 2, mid_channels, 3, 1, 1)
+        self.fusion_middle1 = nn.Conv2d(mid_channels, mid_channels, 4, 2, 1)
+        self.fusion_middle2 = nn.Conv2d(mid_channels, mid_channels, 4, 2, 1)
+
         # downsample
         self.img_downsample = nn.Upsample(
             scale_factor=0.25, mode='bilinear', align_corners=False)
-
-        # activate function
-        self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
-        
 
         # init weights
         self.init_weights()
     
     def init_weights(self):
-        for m in [self.conv_first, self.conv_last]:
+        for m in [self.fusion_first, self.fusion_middle2, self.fusion_middle1, self.fusion_last]:
             default_init_weights(m, 0.1)
 
-    def forward(self, lr_curr, gts, lr_feat):
-        dft_feat = self.dft_feature_extractor(lr_curr)
+    def forward(self, lrs, gts, lr_feat):
+        feat_first = self.conv_first(gts)
 
-        feat = torch.cat([lr_curr, dft_feat], dim=1)
-        feat = self.propagation_resblocks(feat)
+        dft_feat = self.dft_feature_extractor(feat_first)
+
+        feat = torch.cat([feat_first, dft_feat], dim=1)
+        feat = self.fusion_first(feat)
+        feat = self.fusion_middle1(feat) 
+        feat = self.fusion_middle2(feat)  
 
         base = self.img_downsample(gts)
-
-        feat = torch.cat([lr_feat, feat, base], dim=1)
-        feat = self.conv_last(feat)
+        feat = torch.cat([lr_feat, feat, lrs, base], dim=1)
+        feat = self.fusion_last(feat)
 
         return feat
 
@@ -690,7 +691,7 @@ class Decoder(nn.Module):
                 pretrained=None):
         super().__init__()
         # dft decoder blocks
-        self.dft_feature_extractor = DftFeatureExtractor(in_channels=mid_channels ,mid_channels=mid_channels)
+        self.dft_feature_extractor = DftFeatureExtractor(mid_channels=mid_channels)
 
         self.propagation_resblocks = ResidualBlocksWithInputConv(
             2 * mid_channels, mid_channels, 10)

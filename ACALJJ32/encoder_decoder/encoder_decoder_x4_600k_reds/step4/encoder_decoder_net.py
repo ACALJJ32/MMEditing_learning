@@ -570,9 +570,9 @@ class CRANResidualBlockNoBN(nn.Module):
         return feat_prop
 
 class DftFeatureExtractor(nn.Module):
-    def __init__(self, in_channels=3,mid_channels=64, num_blocks=5, with_gauss=True, guass_key = 1.0):
+    def __init__(self, mid_channels=64, num_blocks=5, with_gauss=True, guass_key = 1.0):
         super().__init__()
-        self.conv_first = nn.Conv2d(in_channels, mid_channels, 3, 1, 1, bias=True)
+        self.conv_first = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=True)
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
 
         main = []
@@ -672,7 +672,8 @@ class Encoder(nn.Module):
             default_init_weights(m, 0.1)
 
     def forward(self, lr_curr, gts, lr_feat):
-        dft_feat = self.dft_feature_extractor(lr_curr)
+        lr_feat = self.lrelu(self.conv_first(lr_curr))
+        dft_feat = self.dft_feature_extractor(lr_feat)
 
         feat = torch.cat([lr_curr, dft_feat], dim=1)
         feat = self.propagation_resblocks(feat)
@@ -690,7 +691,7 @@ class Decoder(nn.Module):
                 pretrained=None):
         super().__init__()
         # dft decoder blocks
-        self.dft_feature_extractor = DftFeatureExtractor(in_channels=mid_channels ,mid_channels=mid_channels)
+        self.dft_feature_extractor = DftFeatureExtractor(mid_channels=mid_channels)
 
         self.propagation_resblocks = ResidualBlocksWithInputConv(
             2 * mid_channels, mid_channels, 10)

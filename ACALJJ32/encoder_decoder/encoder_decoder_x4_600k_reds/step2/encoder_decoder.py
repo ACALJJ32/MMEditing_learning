@@ -34,8 +34,6 @@ class EncoderDecoder(BasicRestorer):
 
          # fix pre-trained networks
         self.fix_iter = train_cfg.get('fix_iter', 0) if train_cfg else 0
-        self.rfix_iter = train_cfg.get('rfix_iter', 0) if train_cfg else 0
-
         self.step_counter = 0  # count training steps
         self.is_weight_fixed = False
 
@@ -50,21 +48,22 @@ class EncoderDecoder(BasicRestorer):
             dict: Returned output.
         """
         
-        if self.step_counter < self.fix_iter:
-            if not self.is_weight_fixed:
-                self.is_weight_fixed = True
-                for k, v in self.generator.named_parameters():
-                    if 'edvr_feature_extractor' in k:
-                        v.requires_grad_(False)
+        for k, v in self.generator.named_parameters():
+            if 'edvr_feature_extractor' in k:
+                v.requires_grad_(False)
+                
+        # ==================  fixed EDVR net at first 5000 iter. ================== #
+        # if self.step_counter < self.fix_iter:
+        #     if not self.is_weight_fixed:
+        #         self.is_weight_fixed = True
+        #         for k, v in self.generator.named_parameters():
+        #             if 'edvr_feature_extractor' in k:
+        #                 v.requires_grad_(False)
 
-        elif self.step_counter == self.fix_iter:
-            # train all the parameters
-            self.generator.requires_grad_(True)
-        
-        if self.step_counter > self.rfix_iter:
-            for k, v in self.generator.named_parameters():
-                if 'encoder' in k:
-                    v.requires_grad_(False) 
+        # elif self.step_counter == self.fix_iter:
+        #     # train all the parameters
+        #     self.generator.requires_grad_(True)
+        # ========================================================================= #
 
         outputs = self(**data_batch, test_mode=False)
         loss, log_vars = self.parse_losses(outputs.pop('losses'))

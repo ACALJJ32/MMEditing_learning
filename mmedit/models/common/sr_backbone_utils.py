@@ -95,3 +95,39 @@ class ResidualBlockNoBN(nn.Module):
         identity = x
         out = self.conv2(self.relu(self.conv1(x)))
         return identity + out * self.res_scale
+
+
+class GaussModulation(nn.Module):
+    def __init__(self, mid_channels=64, res_scale=1.0):
+        super().__init__()
+        
+        self.conv_first = nn.Conv2d(1, mid_channels, 1,1,0, bias=False)
+        
+        self.conv_middle1 = nn.Conv2d(mid_channels, mid_channels, 1,1,0, bias=False)
+        self.conv_middle2 = nn.Conv2d(mid_channels, mid_channels, 1,1,0, bias=False)
+        self.conv_middle3 = nn.Conv2d(mid_channels, mid_channels, 1,1,0, bias=False)
+
+        feature_extractor = []
+        feature_extractor.append(
+            make_layer(
+                ResidualBlockNoBN, num_blocks=5, mid_channels=mid_channels))  # modified
+        self.feature_extractor = nn.Sequential(*feature_extractor)
+        
+         # activation function
+        self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
+
+        if res_scale == 1.0:
+            self.init_weights()
+    
+    def init_weights(self):
+        for m in [self.conv_first, self.conv_middle1, self.conv_middle2, self.conv_middle3]:
+            default_init_weights(m, 0.1)
+
+    def forward(self, gauss_key):
+        feat = self.conv_first(gauss_key)
+        feat = self.conv_middle1(feat)
+        feat = self.conv_middle2(feat)
+        feat = self.conv_middle3(feat)
+        feat = self.feature_extractor(feat)
+
+        return feat

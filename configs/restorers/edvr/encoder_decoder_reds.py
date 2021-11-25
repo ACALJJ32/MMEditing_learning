@@ -12,7 +12,7 @@ model = dict(
         'iconvsr/edvrm_reds_20210413-3867262f.pth'),
     pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='sum'))
 # model training and testing settings
-train_cfg = dict(fix_iter=5000)
+train_cfg = dict(fix_iter=15000, rfix_iter=25000)
 test_cfg = dict(metrics=['PSNR'], crop_border=0)
 
 # dataset settings
@@ -135,7 +135,7 @@ total_iters = 600000
 lr_config = dict(
     policy='CosineRestart',
     by_epoch=False,
-    periods=[60000],
+    periods=[600000],
     restart_weights=[1],
     min_lr=1e-7)
 

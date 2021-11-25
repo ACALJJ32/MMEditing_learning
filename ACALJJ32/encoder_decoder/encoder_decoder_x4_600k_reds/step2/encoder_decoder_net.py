@@ -14,7 +14,6 @@ from mmedit.models.common import (PixelShufflePack, ResidualBlockNoBN,
 from mmedit.models.registry import BACKBONES
 from mmedit.models.restorers.encoder_decoder import EncoderDecoder
 from mmedit.utils import get_root_logger
-from mmedit.models.common.sr_backbone_utils import default_init_weights, GaussModulation
 
 class ResidualBlocksWithInputConv(nn.Module):
     """Residual blocks with a convolution in front.
@@ -570,9 +569,9 @@ class CRANResidualBlockNoBN(nn.Module):
         return feat_prop
 
 class DftFeatureExtractor(nn.Module):
-    def __init__(self, in_channels=3,mid_channels=64, num_blocks=5, with_gauss=True, guass_key = 1.0):
+    def __init__(self, mid_channels=64, num_blocks=5, with_gauss=True, guass_key = 1.0):
         super().__init__()
-        self.conv_first = nn.Conv2d(in_channels, mid_channels, 3, 1, 1, bias=True)
+        self.conv_first = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=True)
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
 
         main = []
@@ -597,8 +596,21 @@ class DftFeatureExtractor(nn.Module):
         # Gauss 
         self.with_gauss = with_gauss
         self.guass_key = guass_key
+
+        modulation = [
+            nn.Conv2d(1, mid_channels, 1,1,0, bias=False),
+            nn.LeakyReLU(negative_slope=0.1, inplace=False),
+            nn.Conv2d(mid_channels, mid_channels, 1,1,0, bias=False),
+            nn.LeakyReLU(negative_slope=0.1, inplace=False),
+            nn.Conv2d(mid_channels, mid_channels, 1,1,0, bias=False),
+            nn.LeakyReLU(negative_slope=0.1, inplace=False),
+        ]
+
+        modulation.append(
+            make_layer(
+                ResidualBlockNoBN, 4, mid_channels=mid_channels))
         
-        self.modulation = GaussModulation(mid_channels=mid_channels)
+        self.modulation = nn.Sequential(*modulation)
     
     def modulation_block(self, feat, x_proj):
         b, c, h, w = feat.size()
@@ -617,12 +629,10 @@ class DftFeatureExtractor(nn.Module):
         feat = self.conv_middle(feat)
 
         return feat
-
-    def init_weights(self):
-        for m in [self.conv_first, self.conv_middle, self.fusion, self.conv_last]:
-            default_init_weights(m, 0.1)
-
+           
     def forward(self, lr):
+        b, c, h, w = lr.size()
+
         feat = self.conv_first(lr) # [b, mid_channels, h, w]
         feat = self.main(feat)   # [b, mid_channels, h, w]
 
@@ -641,46 +651,47 @@ class Encoder(nn.Module):
     def __init__(self,
                 in_channels=3,
                 out_channel=64,
-                mid_channels=64
-                ):
+                mid_channels=64,
+                pretrained=None):
         super().__init__()
         self.conv_first = nn.Conv2d(in_channels, mid_channels, 3, 1, 1)
 
         # dft encoder blocks
-        self.dft_feature_extractor = DftFeatureExtractor(mid_channels=mid_channels)
-
-        # residual blocks
-        self.propagation_resblocks = ResidualBlocksWithInputConv(
-            mid_channels + 3, mid_channels, 10)
+        self.dft_feature_extractor1 = DftFeatureExtractor(mid_channels=mid_channels)
 
         # fusion module
-        self.conv_last = nn.Conv2d(mid_channels * 2 + 3, mid_channels, 3, 1, 1)
-        
+        self.fusion1 = nn.Conv2d(mid_channels * 2, mid_channels, 3, 1, 1)
+        self.fusion2 = nn.Conv2d(mid_channels * 2, mid_channels, 4, 2, 1)
+        self.fusion3 = nn.Conv2d(mid_channels, mid_channels, 4, 2, 1)
+        self.fusion4 = nn.Conv2d(mid_channels * 2 + 3, mid_channels, 3, 1, 1)
+
         # downsample
         self.img_downsample = nn.Upsample(
             scale_factor=0.25, mode='bilinear', align_corners=False)
-
-        # activate function
-        self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
         
-
-        # init weights
-        self.init_weights()
+        if isinstance(pretrained, str):
+                logger = get_root_logger()
+                load_checkpoint(self, pretrained, strict=True, logger=logger)
+        elif pretrained is not None:
+            raise TypeError(f'"pretrained" must be a str or None. '
+                            f'But received {type(pretrained)}.')
     
-    def init_weights(self):
-        for m in [self.conv_first, self.conv_last]:
-            default_init_weights(m, 0.1)
+    def forward(self, lrs, gts, lr_feat):
 
-    def forward(self, lr_curr, gts, lr_feat):
-        dft_feat = self.dft_feature_extractor(lr_curr)
+        feat = self.conv_first(gts)
 
-        feat = torch.cat([lr_curr, dft_feat], dim=1)
-        feat = self.propagation_resblocks(feat)
+        dft_feat = self.dft_feature_extractor1(feat)
+        feat = torch.cat([feat, dft_feat], dim=1)
+        feat = self.fusion1(feat)
+
+        feat = torch.cat([feat, dft_feat], dim=1)
+        feat = self.fusion2(feat) 
+        feat = self.fusion3(feat)  
 
         base = self.img_downsample(gts)
 
-        feat = torch.cat([lr_feat, feat, base], dim=1)
-        feat = self.conv_last(feat)
+        feat = torch.cat([lr_feat, base, feat], dim=1)
+        feat = self.fusion4(feat)
 
         return feat
 
@@ -690,10 +701,10 @@ class Decoder(nn.Module):
                 pretrained=None):
         super().__init__()
         # dft decoder blocks
-        self.dft_feature_extractor = DftFeatureExtractor(in_channels=mid_channels ,mid_channels=mid_channels)
+        self.dft_feature_extractor = DftFeatureExtractor(mid_channels=mid_channels)
 
         self.propagation_resblocks = ResidualBlocksWithInputConv(
-            2 * mid_channels, mid_channels, 10)
+            2 * mid_channels, mid_channels, 30)
 
         # fusion module
         self.fusion = nn.Conv2d(mid_channels * 2, mid_channels * 2, 3, 1, 1)
@@ -740,6 +751,10 @@ class EncoderDecoderNet(nn.Module):
         self.conv_last = nn.Conv2d(64, 3, 3, 1, 1)
         self.img_upsample = nn.Upsample(
             scale_factor=4, mode='bilinear', align_corners=False)
+        
+        # dft fusion module
+        self.dft_fusion_module1 = nn.Conv2d(2 * mid_channels + 3, mid_channels, 3, 1, 1, bias=True)
+        self.dft_fusion_module2 = nn.Conv2d(2 * mid_channels + 3, mid_channels, 3, 1, 1, bias=True)
 
         # activation function
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
@@ -768,7 +783,7 @@ class EncoderDecoderNet(nn.Module):
         lr_feat = self.edvr_feature_extractor(lrs)
 
         # encoder propagation
-        gt_feat = self.encoder(lr_curr, gts, lr_feat)
+        gt_feat = self.encoder(lrs, gts, lr_feat)
 
         # decoder propagation
         feat = self.decoder(gt_feat)
