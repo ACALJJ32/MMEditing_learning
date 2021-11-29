@@ -86,8 +86,8 @@ data = dict(
         times=1000,
         dataset=dict(
             type=train_dataset_type,
-            lq_folder='/media/test/Disk2/DATA/VSR/Youku/LR',
-            gt_folder='/media/test/Disk2/DATA/VSR/Youku/HR',
+            lq_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_540p_train_frames',
+            gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
             num_input_frames=15,
             pipeline=train_pipeline,
             scale=4,
@@ -96,9 +96,9 @@ data = dict(
     # val
     val=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk2/DATA/VSR/Youku/LR',
-        gt_folder='/media/test/Disk2/DATA/VSR/Youku/HR',
-        num_input_frames=100,
+        lq_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_540p_train_frames',
+        gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
+        num_input_frames=15,
         pipeline=test_pipeline,
         scale=4,
         val_partition='REDS4',
@@ -106,9 +106,9 @@ data = dict(
     # test
     test=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk2/DATA/VSR/Youku/LR',
-        gt_folder='/media/test/Disk2/DATA/VSR/Youku/HR',
-        num_input_frames=100,
+        lq_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_540p_train_frames',
+        gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
+        num_input_frames=15,
         pipeline=test_pipeline,
         scale=4,
         val_partition='REDS4',
@@ -124,11 +124,11 @@ optimizers = dict(
         paramwise_cfg=dict(custom_keys={'spynet': dict(lr_mult=0.25)})))
 
 # learning policy
-total_iters = 600000
+total_iters = 300000
 lr_config = dict(
     policy='CosineRestart',
     by_epoch=False,
-    periods=[600000],
+    periods=[300000],
     restart_weights=[1],
     min_lr=1e-7)
 

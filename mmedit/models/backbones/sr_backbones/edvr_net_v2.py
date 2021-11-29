@@ -626,7 +626,8 @@ class EDVRV2Net(nn.Module):
         self.dft_feature_extractor = DftFeatureExtractor(mid_channels, num_blocks=10, with_gauss=True, guass_key=1.0)
 
         # decoder
-        self.dft_decoder = Decoder(mid_channels=mid_channels, pretrained='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/VSR/mmediting_cuc/decoder_iter_600000.pth')
+        self.dft_decoder = Decoder(mid_channels=mid_channels, 
+            pretrained='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/VSR/mmediting_cuc/decoder_iter_600000.pth')
 
         # upsample
         self.fusion = nn.Conv2d(

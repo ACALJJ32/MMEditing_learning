@@ -61,10 +61,10 @@ class EncoderDecoder(BasicRestorer):
             # train all the parameters
             self.generator.requires_grad_(True)
         
-        if self.step_counter > self.rfix_iter:
-            for k, v in self.generator.named_parameters():
-                if 'encoder' in k:
-                    v.requires_grad_(False) 
+        # if self.step_counter > self.rfix_iter:
+        #     for k, v in self.generator.named_parameters():
+        #         if 'encoder' in k:
+        #             v.requires_grad_(False) 
 
         outputs = self(**data_batch, test_mode=False)
         loss, log_vars = self.parse_losses(outputs.pop('losses'))

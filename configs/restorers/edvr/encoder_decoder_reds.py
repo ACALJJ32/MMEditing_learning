@@ -12,7 +12,7 @@ model = dict(
         'iconvsr/edvrm_reds_20210413-3867262f.pth'),
     pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='sum'))
 # model training and testing settings
-train_cfg = dict(fix_iter=15000, rfix_iter=25000)
+train_cfg = dict(fix_iter=50000, rfix_iter=25000)
 test_cfg = dict(metrics=['PSNR'], crop_border=0)
 
 # dataset settings

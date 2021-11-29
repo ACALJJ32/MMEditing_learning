@@ -1,13 +1,15 @@
 import torch
 
-state_dict = torch.load('/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/VSR/mmediting_gky/work_dirs/basicvsr_reds4_tencent/modify.pth')
+def modify_iter(model_path, iter = 0):
+    state_dict = torch.load(model_path)
+    print("Model Iters: ", state_dict['meta']['iter'])
 
-print('Iter: ', state_dict['meta']['iter'])
+    print("Modified iter from {} ==> {}.".format(state_dict['meta']['iter'], iter))
+    state_dict['meta']['iter'] = iter
 
-# print('modify iter to 0')
+    torch.save(state_dict, './modified_model_{}.pth'.format(iter))
 
-# state_dict['meta']['iter'] = 0
 
-# print('Iter: ', state_dict['meta']['iter'])
-
-# torch.save(state_dict, './modify.pth')
+if __name__ == "__main__":
+    model_path = "./iter_300000.pth"
+    modify_iter(model_path=model_path)

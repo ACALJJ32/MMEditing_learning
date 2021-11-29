@@ -2,7 +2,8 @@ import torch
 from mmedit.models.backbones.sr_backbones import EncoderDecoderNet, Decoder
 from copy import deepcopy
 
-model_path = '/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/VSR/mmediting_cuc/work_dirs/encoder_decoder_x4_600k_reds/step1/iter_60000.pth'
+# model_path = '/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ljj/VSR/mmediting_cuc/work_dirs/encoder_decoder_x4_600k_reds/step1/iter_60000.pth'
+model_path = './work_dirs/encoder_decoder_x4_600k_reds/iter_60000.pth'
 
 load_net = torch.load(model_path, map_location=lambda storage, loc: storage)
 
