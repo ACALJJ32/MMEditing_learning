@@ -1,4 +1,4 @@
-exp_name = 'edvrm_x4_g8_600k_reds'
+exp_name = 'edvrm_x4_g8_600k_reds_with_sift'
 
 # model settings
 model = dict(
@@ -64,6 +64,7 @@ test_pipeline = [
         io_backend='disk',
         key='gt',
         flag='unchanged'),
+    # dict(type='HomographyWithSIFT', keys=['lq', 'gt'], ratio = 0.25),
     dict(type='RescaleToZeroOne', keys=['lq', 'gt']),
     dict(
         type='Normalize',
@@ -144,12 +145,12 @@ lr_config = dict(
 
 checkpoint_config = dict(interval=5000, save_optimizer=True, by_epoch=False)
 # remove gpu_collect=True in non distributed training
-evaluation = dict(interval=50000, save_image=False, gpu_collect=True)
+evaluation = dict(interval=5000, save_image=False, gpu_collect=True)
 log_config = dict(
     interval=100,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=False),
-        dict(type='TensorboardLoggerHook'),
+        # dict(type='TensorboardLoggerHook'),
         # dict(type='PaviLoggerHook', init_kwargs=dict(project='mmedit-sr'))
     ])
 visual_config = None

@@ -1,7 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from .augmentation import (BinarizeImage, Flip, GenerateFrameIndices,
                            GenerateFrameIndiceswithPadding,
-                           GenerateSegmentIndices, MirrorSequence, Pad,
+                           GenerateSegmentIndices, GenerateSegmentIndicesFixStart, MirrorSequence, Pad,
                            RandomAffine, RandomJitter, RandomMaskDilation,
                            RandomTransposeHW, Resize, TemporalReverse)
 from .compose import Compose

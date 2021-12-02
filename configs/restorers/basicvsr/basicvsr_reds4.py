@@ -1,4 +1,4 @@
-exp_name = 'basicvsr_reds4_gauss_test'
+exp_name = 'basicvsr_reds4'
 
 # model settings
 model = dict(
@@ -7,14 +7,8 @@ model = dict(
         type='BasicVSRNet',
         mid_channels=64,
         num_blocks=30,
-        keyframe_stride=1,
-        padding=2,
         spynet_pretrained='https://download.openmmlab.com/mmediting/restorers/'
-        'basicvsr/spynet_20210409-c6c1bd09.pth',
-        edvr_pretrained='https://download.openmmlab.com/mmediting/restorers/'
-        'iconvsr/edvrm_reds_20210413-3867262f.pth',
-        with_homography_align=False,
-        with_dft=True),
+        'basicvsr/spynet_20210409-c6c1bd09.pth'),
     pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='mean'))
 # model training and testing settings
 train_cfg = dict(fix_iter=5000)
@@ -49,7 +43,7 @@ train_pipeline = [
 ]
 
 test_pipeline = [
-    dict(type='GenerateSegmentIndices', interval_list=[1]),
+    dict(type='GenerateSegmentIndicesFixStart', interval_list=[1]),
     dict(
         type='LoadImageFromFileList',
         io_backend='disk',
@@ -82,7 +76,7 @@ demo_pipeline = [
 
 data = dict(
     workers_per_gpu=6,
-    train_dataloader=dict(samples_per_gpu=2, drop_last=True),  # 2 gpus  Batch size of a single GPU
+    train_dataloader=dict(samples_per_gpu=4, drop_last=True),  # 2 gpus
     val_dataloader=dict(samples_per_gpu=1),
     test_dataloader=dict(samples_per_gpu=1, workers_per_gpu=1),
 
@@ -92,8 +86,8 @@ data = dict(
         times=1000,
         dataset=dict(
             type=train_dataset_type,
-            lq_folder='/media/test/Disk2/DATA/VSR/Youku/LR',
-            gt_folder='/media/test/Disk2/DATA/VSR/Youku/HR',
+            lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
+            gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
             num_input_frames=15,
             pipeline=train_pipeline,
             scale=4,
@@ -102,8 +96,8 @@ data = dict(
     # val
     val=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk2/DATA/VSR/Youku/LR',
-        gt_folder='/media/test/Disk2/DATA/VSR/Youku/HR',
+        lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
+        gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
         num_input_frames=100,
         pipeline=test_pipeline,
         scale=4,
@@ -112,8 +106,8 @@ data = dict(
     # test
     test=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk2/DATA/VSR/Youku/LR',
-        gt_folder='/media/test/Disk2/DATA/VSR/Youku/HR',
+        lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
+        gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
         num_input_frames=100,
         pipeline=test_pipeline,
         scale=4,
@@ -130,11 +124,11 @@ optimizers = dict(
         paramwise_cfg=dict(custom_keys={'spynet': dict(lr_mult=0.125)})))
 
 # learning policy
-total_iters = 600000
+total_iters = 300000
 lr_config = dict(
     policy='CosineRestart',
     by_epoch=False,
-    periods=[600000],
+    periods=[300000],
     restart_weights=[1],
     min_lr=1e-7)
 

@@ -96,11 +96,11 @@ class HomographyWithSIFT:
         for key in self.keys:
             if isinstance(results[key], list):
                 for v in self.keys:
-                    if v == 'lq' and random.random() < self.ratio:
+                    if v == 'lq':# and random.random() < self.ratio:
                         center_index = len(results[v]) // 2
                         center_frame = results[v][center_index].copy()
                         for idx, frame in enumerate(results[v]):
-                            if idx != center_index and abs(idx - center_index) == 1:
+                            if idx != center_index: #  and abs(idx - center_index) == 1:
                                 results[v][idx] = sift(center_frame, frame)
                                     
         return results
