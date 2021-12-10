@@ -7,6 +7,7 @@ from mmcv.runner import load_checkpoint
 from torch.nn.modules.utils import _pair
 from torch.nn.parameter import Parameter
 import math
+import torch.nn.functional as F
 
 from mmedit.models.common import (PixelShufflePack, ResidualBlockNoBN,
                                   make_layer)
@@ -297,6 +298,7 @@ class TSAFusion(nn.Module):
         feat = feat * attn * 2 + attn_add
         return feat
 
+
 @BACKBONES.register_module()
 class EDVRNet(nn.Module):
     """EDVR network structure for video super-resolution.
@@ -382,6 +384,31 @@ class EDVRNet(nn.Module):
         # activation function
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
 
+    def spatial_padding(self, lrs):
+        """ Apply pdding spatially.
+
+        Since the PCD module in EDVR requires that the resolution is a multiple
+        of 4, we apply padding to the input LR images if their resolution is
+        not divisible by 4.
+
+        Args:
+            lrs (Tensor): Input LR sequence with shape (n, t, c, h, w).
+
+        Returns:
+            Tensor: Padded LR sequence with shape (n, t, c, h_pad, w_pad).
+
+        """
+        n, t, c, h, w = lrs.size()
+
+        pad_h = (4 - h % 4) % 4
+        pad_w = (4 - w % 4) % 4
+
+        # padding
+        lrs = lrs.view(-1, c, h, w)
+        lrs = F.pad(lrs, [0, pad_w, 0, pad_h], mode='reflect')
+
+        return lrs.view(n, t, c, h + pad_h, w + pad_w)
+
     def forward(self, x):
         """Forward function for EDVRNet.
 
@@ -391,7 +418,11 @@ class EDVRNet(nn.Module):
         Returns:
             Tensor: SR center frame with shape (n, c, h, w).
         """
-        n, t, c, h, w = x.size()
+        # n, t, c, h, w = x.size()
+        n, t, c, h_input, w_input = x.size()
+        x = self.spatial_padding(x)
+        h, w = x.size(3), x.size(4)
+
         assert h % 4 == 0 and w % 4 == 0, (
             'The height and width of inputs should be a multiple of 4, '
             f'but got {h} and {w}.')
@@ -440,7 +471,7 @@ class EDVRNet(nn.Module):
         out = self.conv_last(out)
         base = self.img_upsample(x_center)
         out += base
-        return out
+        return out[:, :, :4 * h_input, :4 * w_input]
 
     def init_weights(self, pretrained=None, strict=True):
         """Init weights for models.

@@ -33,5 +33,5 @@ __all__ = [
     'CropAroundFg', 'GetSpatialDiscountMask', 'RandomDownSampling',
     'GenerateTrimapWithDistTransform', 'TransformTrimap',
     'GenerateCoordinateAndCell', 'GenerateSegmentIndices', 'MirrorSequence',
-    'CropLike', 'GenerateHeatmap', 'HomographyWithSIFT'
+    'CropLike', 'GenerateHeatmap', 'HomographyWithSIFT', 'GenerateSegmentIndicesFixStart'
 ]

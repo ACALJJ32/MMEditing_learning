@@ -1,4 +1,4 @@
-exp_name = 'basicvsr_plusplus_vimeo90k_bi'
+exp_name = 'basicvsr_plusplus_c64n7_8x1_600k_tencent_gasdfgrdgergergreger'
 
 # model settings
 model = dict(
@@ -12,15 +12,15 @@ model = dict(
         'basicvsr/spynet_20210409-c6c1bd09.pth'),
     pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='mean'))
 # model training and testing settings
-train_cfg = dict(fix_iter=-1)
-test_cfg = dict(metrics=['PSNR', 'SSIM'], crop_border=0, convert_to='y')
+train_cfg = dict(fix_iter=5000)
+test_cfg = dict(metrics=['PSNR'], crop_border=0)
 
 # dataset settings
-train_dataset_type = 'SRVimeo90KMultipleGTDataset'
-val_dataset_type = 'SRFolderMultipleGTDataset'
-test_dataset_type = 'SRVimeo90KDataset'
+train_dataset_type = 'SRLmdbDataset'
+val_dataset_type = 'SRLmdbDataset'
 
 train_pipeline = [
+    dict(type='GenerateSegmentIndices', interval_list=[1]),
     dict(
         type='LoadImageFromFileList',
         io_backend='disk',
@@ -38,32 +38,12 @@ train_pipeline = [
         direction='horizontal'),
     dict(type='Flip', keys=['lq', 'gt'], flip_ratio=0.5, direction='vertical'),
     dict(type='RandomTransposeHW', keys=['lq', 'gt'], transpose_ratio=0.5),
-    dict(type='MirrorSequence', keys=['lq', 'gt']),
     dict(type='FramesToTensor', keys=['lq', 'gt']),
     dict(type='Collect', keys=['lq', 'gt'], meta_keys=['lq_path', 'gt_path'])
 ]
 
-val_pipeline = [
-    dict(type='GenerateSegmentIndices', interval_list=[1]),
-    dict(
-        type='LoadImageFromFileList',
-        io_backend='disk',
-        key='lq',
-        channel_order='rgb'),
-    dict(
-        type='LoadImageFromFileList',
-        io_backend='disk',
-        key='gt',
-        channel_order='rgb'),
-    dict(type='RescaleToZeroOne', keys=['lq', 'gt']),
-    dict(type='FramesToTensor', keys=['lq', 'gt']),
-    dict(
-        type='Collect',
-        keys=['lq', 'gt'],
-        meta_keys=['lq_path', 'gt_path', 'key'])
-]
-
 test_pipeline = [
+    dict(type='GenerateSegmentIndicesFixStart', interval_list=[1]),
     dict(
         type='LoadImageFromFileList',
         io_backend='disk',
@@ -75,7 +55,6 @@ test_pipeline = [
         key='gt',
         channel_order='rgb'),
     dict(type='RescaleToZeroOne', keys=['lq', 'gt']),
-    dict(type='MirrorSequence', keys=['lq']),
     dict(type='FramesToTensor', keys=['lq', 'gt']),
     dict(
         type='Collect',
@@ -84,7 +63,7 @@ test_pipeline = [
 ]
 
 demo_pipeline = [
-    dict(type='GenerateSegmentIndices', interval_list=[1]),
+    dict(type='GenerateSegmentIndices', interval_list=[1]),  # GenerateSegmentIndicesFixStart
     dict(
         type='LoadImageFromFileList',
         io_backend='disk',
@@ -107,29 +86,32 @@ data = dict(
         times=1000,
         dataset=dict(
             type=train_dataset_type,
-            lq_folder='/media/test/Disk2/DATA/VSR/vimeo_septuplet/BI',
-            gt_folder='/media/test/Disk2/DATA/VSR/vimeo_septuplet/sequences',
-            ann_file='/media/test/Disk2/DATA/VSR/vimeo_septuplet/meta_info_Vimeo90K_train_GT.txt',
+            lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic.lmdb',
+            gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp.lmdb',
+            num_input_frames=15,
             pipeline=train_pipeline,
             scale=4,
+            val_partition='REDS4',
             test_mode=False)),
     # val
     val=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk2/DATA/VSR/Vid4/BIx4',
-        gt_folder='/media/test/Disk2/DATA/VSR/Vid4/GT',
-        pipeline=val_pipeline,
+        lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic.lmdb',
+        gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
+        num_input_frames=15,
+        pipeline=test_pipeline,
         scale=4,
+        val_partition='REDS4',
         test_mode=True),
     # test
     test=dict(
-        type=test_dataset_type,
-        lq_folder='/media/test/Disk2/DATA/VSR/vimeo_septuplet/BI',
-        gt_folder='/media/test/Disk2/DATA/VSR/vimeo_septuplet/sequences',
-        ann_file='/media/test/Disk2/DATA/VSR/vimeo_septuplet/meta_info_Vimeo90K_test_GT.txt',
+        type=val_dataset_type,
+        lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic.lmdb',
+        gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
+        num_input_frames=15,
         pipeline=test_pipeline,
         scale=4,
-        num_input_frames=7,
+        val_partition='REDS4',
         test_mode=True),
 )
 
@@ -162,9 +144,10 @@ log_config = dict(
 visual_config = None
 
 # runtime settings
-dist_params = dict(backend='nccl')  # dist_params = dict(backend='nccl', port=29501)
+dist_params = dict(backend='nccl')
 log_level = 'INFO'
 work_dir = f'./work_dirs/{exp_name}'
-load_from = None # 'experiments/basicvsr_plusplus_c64n7_8x1_600k_reds4/iter_600000.pth'  # noqa
+load_from = None
 resume_from = None
 workflow = [('train', 1)]
+find_unused_parameters = True

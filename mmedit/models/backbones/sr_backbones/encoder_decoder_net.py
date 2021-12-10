@@ -469,7 +469,7 @@ class EDVRFeatureExtractor(nn.Module):
         return feat
 
 class DftFeatureExtractor(nn.Module):
-    def __init__(self, in_channels=3,mid_channels=64, num_blocks=5, with_gauss=True, guass_key = 1.0):
+    def __init__(self, in_channels=3, mid_channels=64, num_blocks=5, with_gauss=True, guass_key = 1.0):
         super().__init__()
         self.conv_first = nn.Conv2d(in_channels, mid_channels, 3, 1, 1, bias=True)
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)

@@ -15,7 +15,7 @@ from .model_utils import (extract_around_bbox, extract_bbox_patch, scale_bbox,
                           set_requires_grad)
 from .partial_conv import PartialConv2d
 from .separable_conv_module import DepthwiseSeparableConvModule
-from .sr_backbone_utils import (ResidualBlockNoBN, default_init_weights,
+from .sr_backbone_utils import (ResidualBlockNoBN, DftFeatureExtractor ,default_init_weights,
                                 make_layer)
 from .upsample import PixelShufflePack
 
@@ -26,5 +26,5 @@ __all__ = [
     'DepthwiseSeparableConvModule', 'ContextualAttentionModule', 'GCAModule',
     'SimpleGatedConvModule', 'LinearModule', 'flow_warp',
     'generation_init_weights', 'GANImageBuffer', 'UnetSkipConnectionBlock',
-    'ResidualBlockWithDropout', 'ImgNormalize'
+    'ResidualBlockWithDropout', 'ImgNormalize', 'DftFeatureExtractor'
 ]

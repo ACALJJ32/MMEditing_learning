@@ -1,19 +1,22 @@
-exp_name = 'edvrm_v2_x4_g8_600k_reds'
+exp_name = 'edvrm_x4_g8_600k_reds_test'
 
 # model settings
 model = dict(
-    type='EDVRV2',
+    type='EDVR',
     generator=dict(
         type='EDVRV2Net',
+        in_channels=3,
+        out_channels=3,
         mid_channels=64,
-        num_blocks=30,
-        padding=2,
-        edvr_pretrained='https://download.openmmlab.com/mmediting/restorers/'
-        'iconvsr/edvrm_reds_20210413-3867262f.pth',
-        with_dft=False),
+        num_frames=5,
+        deform_groups=8,
+        num_blocks_extraction=5,
+        num_blocks_reconstruction=10,
+        center_frame_idx=2,
+        with_tsa=True),
     pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='sum'))
 # model training and testing settings
-train_cfg = dict(fix_iter=500000)
+train_cfg = dict(tsa_iter=50000)
 test_cfg = dict(metrics=['PSNR'], crop_border=0)
 
 # dataset settings
@@ -32,7 +35,6 @@ train_pipeline = [
         io_backend='disk',
         key='gt',
         flag='unchanged'),
-    # dict(type='HomographyWithSIFT', keys=['lq', 'gt'], ratio = 0.25),
     dict(type='RescaleToZeroOne', keys=['lq', 'gt']),
     dict(
         type='Normalize',
@@ -62,6 +64,7 @@ test_pipeline = [
         io_backend='disk',
         key='gt',
         flag='unchanged'),
+    # dict(type='HomographyWithSIFT', keys=['lq', 'gt'], ratio = 0.25),
     dict(type='RescaleToZeroOne', keys=['lq', 'gt']),
     dict(
         type='Normalize',
@@ -136,10 +139,8 @@ total_iters = 600000
 lr_config = dict(
     policy='CosineRestart',
     by_epoch=False,
-    # periods=[50000, 100000, 150000, 150000, 150000],
-    periods=[600000],
-    # restart_weights=[1, 1, 1, 1, 1],
-    restart_weights=[1],
+    periods=[50000, 100000, 150000, 150000, 150000],
+    restart_weights=[1, 1, 1, 1, 1],
     min_lr=1e-7)
 
 checkpoint_config = dict(interval=5000, save_optimizer=True, by_epoch=False)
@@ -158,6 +159,6 @@ visual_config = None
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 work_dir = f'./work_dirs/{exp_name}'
-load_from = None
+load_from = 'weight/edvr/edvrm_wotsa_x4_8x4_600k_reds_20200522-0570e567.pth'
 resume_from = None
 workflow = [('train', 1)]

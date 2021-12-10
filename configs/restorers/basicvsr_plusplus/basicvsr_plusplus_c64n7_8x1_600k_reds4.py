@@ -1,4 +1,4 @@
-exp_name = 'basicvsr_plusplus_c64n7_8x1_600k_reds4'
+exp_name = 'basicvsr_plusplus_reds4_bi'
 
 # model settings
 model = dict(
@@ -76,7 +76,7 @@ demo_pipeline = [
 
 data = dict(
     workers_per_gpu=6,
-    train_dataloader=dict(samples_per_gpu=4, drop_last=True),  # 2 gpus
+    train_dataloader=dict(samples_per_gpu=1, drop_last=True),  # 8 gpus
     val_dataloader=dict(samples_per_gpu=1),
     test_dataloader=dict(samples_per_gpu=1, workers_per_gpu=1),
 
@@ -86,9 +86,9 @@ data = dict(
         times=1000,
         dataset=dict(
             type=train_dataset_type,
-            lq_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_540p_train_frames',
-            gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
-            num_input_frames=15,
+            lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
+            gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
+            num_input_frames=30,
             pipeline=train_pipeline,
             scale=4,
             val_partition='REDS4',
@@ -96,9 +96,9 @@ data = dict(
     # val
     val=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_540p_train_frames',
-        gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
-        num_input_frames=15,
+        lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
+        gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
+        num_input_frames=100,
         pipeline=test_pipeline,
         scale=4,
         val_partition='REDS4',
@@ -106,9 +106,9 @@ data = dict(
     # test
     test=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_540p_train_frames',
-        gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
-        num_input_frames=15,
+        lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
+        gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
+        num_input_frames=100,
         pipeline=test_pipeline,
         scale=4,
         val_partition='REDS4',
@@ -124,11 +124,11 @@ optimizers = dict(
         paramwise_cfg=dict(custom_keys={'spynet': dict(lr_mult=0.25)})))
 
 # learning policy
-total_iters = 300000
+total_iters = 600000
 lr_config = dict(
     policy='CosineRestart',
     by_epoch=False,
-    periods=[300000],
+    periods=[600000],
     restart_weights=[1],
     min_lr=1e-7)
 
@@ -151,3 +151,4 @@ load_from = None
 resume_from = None
 workflow = [('train', 1)]
 find_unused_parameters = True
+

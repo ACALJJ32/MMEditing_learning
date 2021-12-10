@@ -114,7 +114,7 @@ def make_lmdb(mode,
     print('\nFinish writing lmdb.')
 
 
-def generate_anno_file(train_list, file_name='meta_info_Vimeo90K_GT.txt'):
+def generate_anno_file(train_list, file_name='meta_info_Vimeo90K_train_GT.txt'):   # meta_info_Vimeo90K_test_GT   meta_info_Vimeo90K_GT
     """Generate anno file for Vimeo90K datasets from the official train list.
 
     Args:

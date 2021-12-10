@@ -1,4 +1,4 @@
-exp_name = 'edvrm_x4_g8_600k_reds_with_sift'
+exp_name = 'edvrm_x4_g8_600k_reds'
 
 # model settings
 model = dict(

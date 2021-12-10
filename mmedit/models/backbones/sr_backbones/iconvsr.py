@@ -1,3 +1,4 @@
+# Copyright (c) OpenMMLab. All rights reserved.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,12 +16,10 @@ from .edvr_net import PCDAlignment, TSAFusion
 @BACKBONES.register_module()
 class IconVSR(nn.Module):
     """IconVSR network structure for video super-resolution.
-
     Support only x4 upsampling.
     Paper:
         BasicVSR: The Search for Essential Components in Video Super-Resolution
         and Beyond, CVPR, 2021
-
     Args:
         mid_channels (int): Channel number of the intermediate features.
             Default: 64.
@@ -85,17 +84,13 @@ class IconVSR(nn.Module):
 
     def spatial_padding(self, lrs):
         """ Apply pdding spatially.
-
         Since the PCD module in EDVR requires that the resolution is a multiple
         of 4, we apply padding to the input LR images if their resolution is
         not divisible by 4.
-
         Args:
             lrs (Tensor): Input LR sequence with shape (n, t, c, h, w).
-
         Returns:
             Tensor: Padded LR sequence with shape (n, t, c, h_pad, w_pad).
-
         """
         n, t, c, h, w = lrs.size()
 
@@ -110,10 +105,8 @@ class IconVSR(nn.Module):
 
     def check_if_mirror_extended(self, lrs):
         """Check whether the input is a mirror-extended sequence.
-
         If mirror-extended, the i-th (i=0, ..., t-1) frame is equal to the
         (t-1-i)-th frame.
-
         Args:
             lrs (tensor): Input LR images with shape (n, t, c, h, w)
         """
@@ -149,13 +142,10 @@ class IconVSR(nn.Module):
 
     def compute_flow(self, lrs):
         """Compute optical flow using SPyNet for feature warping.
-
         Note that if the input is an mirror-extended sequence, 'flows_forward'
         is not needed, since it is equal to 'flows_backward.flip(1)'.
-
         Args:
             lrs (tensor): Input LR images with shape (n, t, c, h, w)
-
         Return:
             tuple(Tensor): Optical flow. 'flows_forward' corresponds to the
                 flows used for forward-time propagation (current to previous).
@@ -267,10 +257,8 @@ class IconVSR(nn.Module):
 
 class EDVRFeatureExtractor(nn.Module):
     """EDVR feature extractor for information-refill in IconVSR.
-
     We use EDVR-M in IconVSR. To adopt pretrained models, please
     specify "pretrained".
-
     Paper:
     EDVR: Video Restoration with Enhanced Deformable Convolutional Networks.
     Args:
@@ -391,15 +379,3 @@ class EDVRFeatureExtractor(nn.Module):
             feat = self.fusion(aligned_feat)
 
         return feat
-
-
-# if __name__ == "__main__":
-#     import os
-#     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-#     net = BasicVSRNet()
-#     net.cuda()
-#     net.eval()
-#     x = torch.ones((1,20,3,64,64))
-#     put = net(x.cuda())
-#     print(x.size())
-#     print(put.size())

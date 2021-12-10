@@ -1,5 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import torch.nn as nn
+import torch, math
 from mmcv.cnn import constant_init, kaiming_init
 from mmcv.utils.parrots_wrapper import _BatchNorm
 
@@ -110,7 +111,7 @@ class GaussModulation(nn.Module):
         feature_extractor = []
         feature_extractor.append(
             make_layer(
-                ResidualBlockNoBN, num_blocks=5, mid_channels=mid_channels))  # modified
+                ResidualBlockNoBN, num_blocks=5, mid_channels=mid_channels)) 
         self.feature_extractor = nn.Sequential(*feature_extractor)
         
          # activation function
@@ -131,3 +132,73 @@ class GaussModulation(nn.Module):
         feat = self.feature_extractor(feat)
 
         return feat
+
+
+class DftFeatureExtractor(nn.Module):
+    def __init__(self, in_channels=64, mid_channels=64, num_blocks=4, with_gauss=True, guass_key = 1.0):
+        super().__init__()
+        self.conv_first = nn.Conv2d(in_channels, mid_channels, 3, 1, 1, bias=True)
+        self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
+
+        main = []
+        main.append(
+            make_layer(
+                ResidualBlockNoBN, num_blocks=num_blocks, mid_channels=mid_channels))  
+        self.main = nn.Sequential(*main)
+
+        self.conv_middle = nn.Conv2d(3 * mid_channels, mid_channels, 3, 1, 1, bias=True)
+
+        last_feature_extractor = []
+        last_feature_extractor.append(
+            make_layer(
+                ResidualBlockNoBN, num_blocks=num_blocks, mid_channels=mid_channels)) 
+        self.last_feature_extractor = nn.Sequential(*last_feature_extractor)
+
+        # fusion
+        self.fusion = nn.Conv2d(mid_channels * 2, mid_channels, 3, 1, 1)
+
+        self.conv_last = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=True)
+
+        # Gauss 
+        self.with_gauss = with_gauss
+        self.guass_key = guass_key
+        
+        self.modulation = GaussModulation(mid_channels=mid_channels)
+    
+    def modulation_block(self, feat, x_proj):
+        b, c, h, w = feat.size()
+
+        gauss_b = torch.randn((h,h)).to(feat.device)
+        
+        # modulate the gauss mat
+        gauss_key =  torch.ones((b,1,h,h)) * self.guass_key
+        gauss_key = gauss_key.to(feat.device)
+        gauss_key = self.modulation(gauss_key)
+        gauss_b = gauss_b * gauss_key
+
+        x_proj = torch.matmul(gauss_b, x_proj)
+
+        feat = torch.cat((torch.sin(x_proj), torch.cos(x_proj), feat), dim=1)  # [b, 2 * mid_channels, h, w]
+        feat = self.conv_middle(feat)
+
+        return feat
+
+    def init_weights(self):
+        for m in [self.conv_first, self.conv_middle, self.fusion, self.conv_last]:
+            default_init_weights(m, 0.1)
+
+    def forward(self, lr):
+        feat = self.conv_first(lr) # [b, mid_channels, h, w]
+        feat = self.main(feat)   # [b, mid_channels, h, w]
+
+        x_proj = (2 * math.pi * feat)
+
+        if self.with_gauss:
+            feat_prop = self.modulation_block(feat, x_proj)
+            feat = torch.cat([feat_prop, feat], dim=1)
+            feat = self.fusion(feat)
+
+        feat = self.last_feature_extractor(feat)
+
+        return feat
+

@@ -114,6 +114,9 @@ work_dirs/
 /data/
 /data
 mmmedit/.mim
+ACALJJ32/
+frame/
+result/
 
 # Pytorch
 *.pth
