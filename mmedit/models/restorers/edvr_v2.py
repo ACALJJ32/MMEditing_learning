@@ -32,11 +32,7 @@ class EDVRV2(BasicRestorer):
         super().__init__(generator, pixel_loss, train_cfg, test_cfg,
                          pretrained)
         self.with_tsa = generator.get('with_tsa', False)
-
-         # fix pre-trained networks
-        self.fix_iter = train_cfg.get('fix_iter', 0) if train_cfg else 0
         self.step_counter = 0  # count training steps
-        self.is_weight_fixed = False
 
     def train_step(self, data_batch, optimizer):
         """Train step.
@@ -47,18 +43,19 @@ class EDVRV2(BasicRestorer):
 
         Returns:
             dict: Returned output.
-        """      
-    
-        if self.step_counter < self.fix_iter:
-            if not self.is_weight_fixed:
-                self.is_weight_fixed = True
-                for k, v in self.generator.named_parameters():
-                    if 'edvr_feature_extractor' in k or 'dft_decoder' in k:
-                        v.requires_grad_(False)
+        """
+        # requires_grad_false_list = ['dft_extractor', 'dft_fusion']
 
-        elif self.step_counter == self.fix_iter:
-            # train all the parameters
-            self.generator.requires_grad_(True)
+        if self.step_counter == 0 and self.with_tsa:
+            if self.train_cfg is None or (self.train_cfg is not None and
+                                          'tsa_iter' not in self.train_cfg):
+                raise KeyError(
+                    'In TSA mode, train_cfg must contain "tsa_iter".')
+
+            # only train DFT module at the beginging if with TSA module
+            for k, v in self.generator.named_parameters():
+                if 'dft_extractor' not in k:
+                    v.requires_grad = False
 
         outputs = self(**data_batch, test_mode=False)
         loss, log_vars = self.parse_losses(outputs.pop('losses'))
@@ -84,6 +81,26 @@ class EDVRV2(BasicRestorer):
         """
         out = self.generator(imgs)
         return out
+
+    def forward_train(self, lq, gt):
+        """Training forward function.
+
+        Args:
+            lq (Tensor): LQ Tensor with shape (n, c, h, w).
+            gt (Tensor): GT Tensor with shape (n, c, h, w).
+
+        Returns:
+            Tensor: Output tensor.
+        """
+        losses = dict()
+        output = self.generator(lq)
+        loss_pix = self.pixel_loss(output, gt)
+        losses['loss_pix'] = loss_pix
+        outputs = dict(
+            losses=losses,
+            num_samples=len(gt.data),
+            results=dict(lq=lq.cpu(), gt=gt.cpu(), output=[v.cpu() for v in output]))
+        return outputs
 
     def forward_test(self,
                      lq,
@@ -130,6 +147,29 @@ class EDVRV2(BasicRestorer):
             else:
                 raise ValueError('iteration should be number or None, '
                                  f'but got {type(iteration)}')
-            mmcv.imwrite(tensor2img(output), save_path)
+            mmcv.imwrite(tensor2img(output[0]), save_path)
 
         return results
+
+    def evaluate(self, output, gt):
+        """Evaluation function.
+
+        Args:
+            output (Tensor): Model output with shape (n, c, h, w).
+            gt (Tensor): GT Tensor with shape (n, c, h, w).
+
+        Returns:
+            dict: Evaluation results.
+        """
+        crop_border = self.test_cfg.crop_border
+
+        pred_hr, _, _ = output
+
+        output = tensor2img(pred_hr)
+        gt = tensor2img(gt)
+
+        eval_result = dict()
+        for metric in self.test_cfg.metrics:
+            eval_result[metric] = self.allowed_metrics[metric](output, gt,
+                                                               crop_border)
+        return eval_result

@@ -14,6 +14,7 @@ from mmedit.models.common import (PixelShufflePack, ResidualBlockNoBN,
 from mmedit.models.registry import BACKBONES
 from mmedit.utils import get_root_logger
 from mmedit.models.common import DftFeatureExtractor
+from collections import OrderedDict
 
 
 class ModulatedDCNPack(ModulatedDeformConv2d):
@@ -333,10 +334,12 @@ class EDVRV2Net(nn.Module):
                  num_blocks_extraction=5,
                  num_blocks_reconstruction=10,
                  center_frame_idx=2,
-                 with_tsa=True):
+                 with_tsa=True,
+                 with_dft=True):
         super().__init__()
         self.center_frame_idx = center_frame_idx
         self.with_tsa = with_tsa
+        self.with_dft = with_dft
         act_cfg = dict(type='LeakyReLU', negative_slope=0.1)
 
         self.conv_first = nn.Conv2d(in_channels, mid_channels, 3, 1, 1)
@@ -386,10 +389,19 @@ class EDVRV2Net(nn.Module):
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
 
         # gauss feature extractor
-        self.dft_extractor = DftFeatureExtractor(in_channels=mid_channels, mid_channels = mid_channels)
+        self.dft_extractor = DftFeatureExtractor(in_channels=mid_channels, mid_channels = mid_channels, num_blocks=5)
 
         # dft fusion
         self.dft_fusion = nn.Conv2d(mid_channels * 2, mid_channels, 3, 1, 1, bias=True)
+
+        # dual learning
+        self.img_downsample = nn.Upsample(
+            scale_factor=0.25, mode='bilinear', align_corners=False)
+
+        self.downsample_conv = ResidualBlocksWithInputDownsampleConv(
+            in_channels=3, mid_channels=mid_channels, out_channels=3, num_blocks=4
+        )
+
 
     def spatial_padding(self, lrs):
         """ Apply pdding spatially.
@@ -470,9 +482,10 @@ class EDVRV2Net(nn.Module):
             aligned_feat = aligned_feat.view(n, -1, h, w)
             feat = self.fusion(aligned_feat)
         
-        # dft_feat = self.dft_extractor(feat)
-        # feat = torch.cat([dft_feat, feat], dim=1)
-        # feat = self.dft_fusion(feat)
+        if self.with_dft:
+            dft_feat = self.dft_extractor(feat)
+            feat = torch.cat([dft_feat, feat], dim=1)
+            feat = self.dft_fusion(feat)
 
         # reconstruction
         out = self.reconstruction(feat)
@@ -482,7 +495,11 @@ class EDVRV2Net(nn.Module):
         out = self.conv_last(out)
         base = self.img_upsample(x_center)
         out += base
-        return out[:, :, :4 * h_input, :4 * w_input]
+
+        # dual learning
+        dual_img = self.downsample_conv(out)  # (n, c, h, w)
+
+        return out[:, :, :4 * h_input, :4 * w_input], x_center, dual_img[:, :, :h, :w]
 
     def init_weights(self, pretrained=None, strict=True):
         """Init weights for models.
@@ -513,6 +530,88 @@ class EDVRV2Net(nn.Module):
                         nonlinearity='leaky_relu',
                         bias=0,
                         distribution='uniform')
+
+            # init dual learning layers
+            # nn.init.kaiming_normal_(self.img_downsample_conv1[0].weight.data)
+            # nn.init.kaiming_normal_(self.img_downsample_conv1[2].weight.data)
+            # nn.init.kaiming_normal_(self.img_downsample_conv2[0].weight.data)
+            # nn.init.kaiming_normal_(self.img_downsample_conv2[2].weight.data)
+
         else:
             raise TypeError(f'"pretrained" must be a str or None. '
                             f'But received {type(pretrained)}.')
+
+
+class ResidualBlocksWithInputConv(nn.Module):
+    """Residual blocks with a convolution in front.
+    Args:
+        in_channels (int): Number of input channels of the first conv.
+        out_channels (int): Number of channels of the residual blocks.
+            Default: 64.
+        num_blocks (int): Number of residual blocks. Default: 30.
+    """
+
+    def __init__(self, in_channels, out_channels=64, num_blocks=30):
+        super().__init__()
+
+        main = []
+
+        # a convolution used to match the channels of the residual blocks
+        main.append(nn.Conv2d(in_channels, out_channels, 3, 1, 1, bias=True))
+        main.append(nn.LeakyReLU(negative_slope=0.1, inplace=True))
+
+        # residual blocks
+        main.append(
+            make_layer(
+                ResidualBlockNoBN, num_blocks, mid_channels=out_channels))
+
+        self.main = nn.Sequential(*main)
+
+    def forward(self, feat):
+        """
+        Forward function for ResidualBlocksWithInputConv.
+        Args:
+            feat (Tensor): Input feature with shape (n, in_channels, h, w)
+        Returns:
+            Tensor: Output feature with shape (n, out_channels, h, w)
+        """
+        return self.main(feat)
+
+
+class ResidualBlocksWithInputDownsampleConv(nn.Module):
+    """Residual blocks with a convolution in front.
+    Args:
+        in_channels (int): Number of input channels of the first conv.
+        out_channels (int): Number of channels of the residual blocks.
+            Default: 64.
+        num_blocks (int): Number of residual blocks. Default: 30.
+    """
+
+    def __init__(self, in_channels, mid_channels=64, out_channels=3, num_blocks=4):
+        super().__init__()
+
+        main = []
+
+        # a convolution used to match the channels of the residual blocks
+        main.append(nn.Conv2d(in_channels, mid_channels, 3, 2, 1, bias=True))
+        main.append(nn.LeakyReLU(negative_slope=0.1, inplace=True))
+        
+        # residual blocks
+        main.append(
+            make_layer(
+                ResidualBlockNoBN, num_blocks, mid_channels=mid_channels))
+        
+        main.append(nn.Conv2d(mid_channels, out_channels, 3, 2, 1, bias=True))
+        main.append(nn.LeakyReLU(negative_slope=0.1, inplace=True))
+
+        self.main = nn.Sequential(*main)
+
+    def forward(self, feat):
+        """
+        Forward function for ResidualBlocksWithInputConv.
+        Args:
+            feat (Tensor): Input feature with shape (n, in_channels, h, w)
+        Returns:
+            Tensor: Output feature with shape (n, out_channels, h, w)
+        """
+        return self.main(feat)

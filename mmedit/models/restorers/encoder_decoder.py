@@ -111,6 +111,26 @@ class EncoderDecoder(BasicRestorer):
         out = self.generator(imgs)
         return out
 
+    def forward_train(self, lq, gt):
+        """Training forward function.
+
+        Args:
+            lq (Tensor): LQ Tensor with shape (n, c, h, w).
+            gt (Tensor): GT Tensor with shape (n, c, h, w).
+
+        Returns:
+            Tensor: Output tensor.
+        """
+        losses = dict()
+        output = self.generator(lq)
+        loss_pix = self.pixel_loss(output, gt)
+        losses['loss_pix'] = loss_pix
+        outputs = dict(
+            losses=losses,
+            num_samples=len(gt.data),
+            results=dict(lq=lq.cpu(), gt=gt.cpu(), output=[v.cpu() for v in output]))
+        return outputs
+
     def forward_test(self,
                      lq,
                      gt=None,

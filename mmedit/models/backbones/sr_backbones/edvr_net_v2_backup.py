@@ -695,3 +695,17 @@ class EDVRV2Net(nn.Module):
         out += base                                  # [b, c, h, w]
 
         return out
+
+
+
+# self.img_downsample_conv1 = nn.Sequential(OrderedDict([
+#             ('blur', nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)),
+#             ('lrelu', nn.LeakyReLU(negative_slope=0.1, inplace=True)),
+#             ('kernel', nn.Conv2d(mid_channels, mid_channels, 3, 2, 1, bias=True))
+#         ]))
+
+#         self.img_downsample_conv2 = nn.Sequential(OrderedDict([
+#             ('blur', nn.Conv2d(mid_channels, mid_channels, 3, 1, 1, bias=False)),
+#             ('lrelu', nn.LeakyReLU(negative_slope=0.1, inplace=True)),
+#             ('kernel', nn.Conv2d(mid_channels, mid_channels, 3, 2, 1, bias=True))
+#         ]))
