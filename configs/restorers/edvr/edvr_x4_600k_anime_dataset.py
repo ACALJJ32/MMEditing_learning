@@ -1,4 +1,4 @@
-exp_name = 'edvrm_x4_g8_600k_reds'
+exp_name = 'edvrm_x4_g8_600k_anime'
 
 # model settings
 model = dict(
@@ -101,9 +101,9 @@ data = dict(
         times=1000,
         dataset=dict(
             type=train_dataset_type,
-            lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
-            gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
-            ann_file='/media/test/Disk2/DATA/VSR/REDS/train/meta_info_REDS_GT.txt',
+            lq_folder='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/lr',
+            gt_folder='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/gt',
+            ann_file='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/meta_info_anime_GT.txt',
             num_input_frames=5,
             pipeline=train_pipeline,
             scale=4,
@@ -111,9 +111,9 @@ data = dict(
             test_mode=False)),
     val=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
-        gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
-        ann_file='/media/test/Disk2/DATA/VSR/REDS/train/meta_info_REDS_GT.txt',
+        lq_folder='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/lr',
+        gt_folder='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/gt',
+        ann_file='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/meta_info_anime_GT.txt',
         num_input_frames=5,
         pipeline=test_pipeline,
         scale=4,
@@ -121,9 +121,9 @@ data = dict(
         test_mode=True),
     test=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
-        gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
-        ann_file='/media/test/Disk2/DATA/VSR/REDS/train/meta_info_REDS_GT.txt',
+        lq_folder='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/lr',
+        gt_folder='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/gt',
+        ann_file='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/meta_info_anime_GT.txt',
         num_input_frames=5,
         pipeline=test_pipeline,
         scale=4,
@@ -150,6 +150,8 @@ log_config = dict(
     interval=100,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=False),
+        # dict(type='TensorboardLoggerHook'),
+        # dict(type='PaviLoggerHook', init_kwargs=dict(project='mmedit-sr'))
     ])
 visual_config = None
 

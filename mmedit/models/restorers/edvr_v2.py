@@ -54,7 +54,7 @@ class EDVRV2(BasicRestorer):
 
             # only train DFT module at the beginging if with TSA module
             for k, v in self.generator.named_parameters():
-                if 'dft_extractor' not in k:
+                if 'dft_extractor' not in k and 'dft_fusion' not in k:
                     v.requires_grad = False
 
         outputs = self(**data_batch, test_mode=False)

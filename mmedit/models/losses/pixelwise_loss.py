@@ -256,46 +256,6 @@ class MaskedTVLoss(L1Loss):
         return loss
 
 
-@LOSSES.register_module()
-class PCFLoss(nn.Module):
-    def __init__(self, loss_weight=1.0, reduction='mean', sample_wise=False, eps=1e-12):
-        super().__init__()
-
-        if reduction not in ['none', 'mean', 'sum']:
-            raise ValueError(f'Unsupported reduction mode: {reduction}. '
-                             f'Supported ones are: {_reduction_modes}')
-        
-        self.loss_weight = loss_weight
-        self.reduction = reduction
-        self.sample_wise = sample_wise
-        self.eps = eps
-
-    def forward(self, pred, target, weight=None, **kwargs):
-        """Forward Function.
-
-        Args:
-            pred (Tensor): of shape (N, C, H, W). Predicted tensor.
-            target (Tensor): of shape (N, C, H, W). Ground truth tensor.
-            weight (Tensor, optional): of shape (N, C, H, W). Element-wise
-                weights. Default: None.
-        """
-
-        # L1
-        hrs, gts = pred[0], pred[1]
-
-        charbonnier_loss_l1 = charbonnier_loss(
-            hrs,
-            target,
-            weight,
-            eps=self.eps,
-            reduction=self.reduction,
-            sample_wise=self.sample_wise)
-
-        l1 = self.loss_weight * charbonnier_loss_l1
-
-        return l1 
-
-
 class FocalFrequencyLoss(nn.Module):
     """The torch.nn.Module class that implements focal frequency loss - a
     frequency domain loss function for optimizing generative models.
