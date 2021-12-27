@@ -54,6 +54,32 @@ def charbonnier_loss(pred, target, eps=1e-12):
 
 
 @masked_loss
+def focal_loss_amplitude(pred_fft_shift, target_fft_shift):
+    pred_fft_shift_amp = torch.log(torch.abs(pred_fft_shift))
+    target_fft_shift_amp = torch.log(torch.abs(target_fft_shift))
+
+    return charbonnier_loss(pred_fft_shift_amp, target_fft_shift_amp)
+
+
+@masked_loss
+def focal_loss_phase(pred_fft_shift, target_fft_shift):
+    pred_fft_shift_phase = torch.angle(pred_fft_shift)
+    target_fft_shift_phase = torch.angle(target_fft_shift)
+
+    return charbonnier_loss(pred_fft_shift_phase, target_fft_shift_phase)
+
+@masked_loss
+def focal_loss_v2(pred, target, eps=1e-12, alpha=1.0):
+    # 2D DFT with orthonnomalization
+    pred_fft = torch.fft.fft2(pred, norm='ortho')
+    target_fft = torch.fft.fft2(target, norm='ortho')
+
+    pred_fft_shift = torch.fft.fftshift(pred_fft)
+    target_fft_shift = torch.fft.fftshift(target_fft)
+
+    return focal_loss_amplitude(pred_fft_shift, target_fft_shift) + focal_loss_phase(pred_fft_shift, target_fft_shift)
+
+@masked_loss
 def focal_loss(pred, target, eps=1e-12, alpha=1.0):
     """Charbonnier loss.
 
@@ -64,11 +90,9 @@ def focal_loss(pred, target, eps=1e-12, alpha=1.0):
     Returns:
         Tensor: Calculated Charbonnier loss.
     """
-    
     # 2D DFT with orthonnomalization
     pred_fft = torch.fft.fft2(pred, norm='ortho')
     target_fft = torch.fft.fft2(target, norm='ortho')
-
 
     x_dist = (target_fft.real - pred_fft.real) ** 2
     y_dist = (target_fft.imag - pred_fft.imag) ** 2
@@ -85,6 +109,7 @@ def focal_loss(pred, target, eps=1e-12, alpha=1.0):
     prod = torch.mul(squared_mat, norm_weight_mat)
 
     return prod
+
 
 @LOSSES.register_module()
 class L1Loss(nn.Module):
@@ -407,6 +432,6 @@ class MultiStreamLoss(nn.Module):
         #     reduction=self.reduction,
         #     sample_wise=self.sample_wise)
         
-        # facol_loss = focal_loss(pred_hr, target)
+        facol_loss = focal_loss(pred_hr, target)
 
-        return loss_stream1
+        return loss_stream1 + 0.5 * facol_loss

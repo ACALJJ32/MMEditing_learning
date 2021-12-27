@@ -54,8 +54,13 @@ class EDVRV2(BasicRestorer):
 
             # only train DFT module at the beginging if with TSA module
             for k, v in self.generator.named_parameters():
-                if 'dft_extractor' not in k and 'dft_fusion' not in k:
+                if 'dft_extractor' not in k and 'dft_fusion' not in k and 'fusion' not in k:
                     v.requires_grad = False
+        
+        if self.step_counter == self.train_cfg.tsa_iter:
+            # train all the parameters
+            for v in self.generator.parameters():
+                v.requires_grad = True
 
         outputs = self(**data_batch, test_mode=False)
         loss, log_vars = self.parse_losses(outputs.pop('losses'))

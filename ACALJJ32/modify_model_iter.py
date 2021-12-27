@@ -11,5 +11,5 @@ def modify_iter(model_path, iter = 0):
 
 
 if __name__ == "__main__":
-    model_path = "./iter_300000.pth"
+    model_path = "./edvrm_x4_8x4_600k_reds_20210625-e29b71b5.pth"
     modify_iter(model_path=model_path)

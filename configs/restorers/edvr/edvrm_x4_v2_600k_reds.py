@@ -16,6 +16,7 @@ model = dict(
         with_tsa=True,
         with_dft=True),
     pixel_loss=dict(type='MultiStreamLoss', loss_weight=1.0, reduction='sum'))
+
 # model training and testing settings
 train_cfg = dict(tsa_iter=50000)
 test_cfg = dict(metrics=['PSNR'], crop_border=0)
@@ -135,12 +136,12 @@ data = dict(
 # optimizer
 optimizers = dict(generator=dict(type='Adam', lr=2e-4, betas=(0.9, 0.999)))
 
-total_iters = 10000
+total_iters = 600000
 lr_config = dict(
     policy='CosineRestart',
     by_epoch=False,
-    periods=[10000],
-    restart_weights=[1],
+    periods=[50000, 100000, 150000, 150000, 150000],
+    restart_weights=[1, 1, 1, 1, 1],
     min_lr=1e-7)
 
 checkpoint_config = dict(interval=5000, save_optimizer=True, by_epoch=False)
@@ -150,8 +151,6 @@ log_config = dict(
     interval=100,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=False),
-        # dict(type='TensorboardLoggerHook'),
-        # dict(type='PaviLoggerHook', init_kwargs=dict(project='mmedit-sr'))
     ])
 visual_config = None
 
@@ -159,6 +158,6 @@ visual_config = None
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 work_dir = f'./work_dirs/{exp_name}'
-load_from = 'weight/edvr/edvrm_x4_8x4_600k_reds_20210625-e29b71b5.pth'    #  edvrm_x4_8x4_600k_reds_20210625-e29b71b5   edvrm_wotsa_x4_8x4_600k_reds_20200522-0570e567.pth   
+load_from = 'weight/edvr/edvrm_wotsa_x4_8x4_600k_reds_20200522-0570e567.pth'    #  edvrm_x4_8x4_600k_reds_20210625-e29b71b5   edvrm_wotsa_x4_8x4_600k_reds_20200522-0570e567.pth   
 resume_from = None
 workflow = [('train', 1)]

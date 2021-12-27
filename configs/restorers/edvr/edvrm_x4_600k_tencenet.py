@@ -1,4 +1,4 @@
-exp_name = 'edvrm_x4_g8_600k_anime'
+exp_name = 'edvrm_x4_600k_tencent'
 
 # model settings
 model = dict(
@@ -20,8 +20,8 @@ train_cfg = dict(tsa_iter=50000)
 test_cfg = dict(metrics=['PSNR'], crop_border=0)
 
 # dataset settings
-train_dataset_type = 'SRAnimeDataset'
-val_dataset_type = 'SRAnimeDataset'
+train_dataset_type = 'SRREDSDataset'
+val_dataset_type = 'SRREDSDataset'
 train_pipeline = [
     dict(type='GenerateFrameIndices', interval_list=[1], frames_per_clip=99),
     dict(type='TemporalReverse', keys='lq_path', reverse_ratio=0),
@@ -100,33 +100,33 @@ data = dict(
         times=1000,
         dataset=dict(
             type=train_dataset_type,
-            lq_folder='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/lr',
-            gt_folder='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/gt',
-            ann_file='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/meta_info_anime_GT.txt',
+            lq_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_540p_train_frames',
+            gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
+            ann_file='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/meta_info_Tencent_GT.txt',
             num_input_frames=5,
             pipeline=train_pipeline,
             scale=4,
-            val_partition='official',
+            val_partition='REDS4',
             test_mode=False)),
     val=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/lr',
-        gt_folder='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/gt',
-        ann_file='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/meta_info_anime_GT.txt',
+        lq_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_540p_train_frames',
+        gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
+        ann_file='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/meta_info_Tencent_GT.txt',
         num_input_frames=5,
         pipeline=test_pipeline,
         scale=4,
-        val_partition='official',
+        val_partition='REDS4',
         test_mode=True),
     test=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/lr',
-        gt_folder='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/gt',
-        ann_file='/media/test/Disk3/DATA/Anime_dataset/anime_dataset/meta_info_anime_GT.txt',
+        lq_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_540p_train_frames',
+        gt_folder='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/SDR_4K_train_frames',
+        ann_file='/media/test/Disk2/DATA/VSR/Tencent_SDR/train/meta_info_Tencent_GT.txt',
         num_input_frames=5,
         pipeline=test_pipeline,
         scale=4,
-        val_partition='official',
+        val_partition='REDS4',
         test_mode=True),
 )
 
@@ -142,13 +142,15 @@ lr_config = dict(
     restart_weights=[1, 1, 1, 1, 1],
     min_lr=1e-7)
 
-checkpoint_config = dict(interval=10000, save_optimizer=True, by_epoch=False)
+checkpoint_config = dict(interval=5000, save_optimizer=True, by_epoch=False)
 # remove gpu_collect=True in non distributed training
-evaluation = dict(interval=100, save_image=True, gpu_collect=True)
+evaluation = dict(interval=5000, save_image=False, gpu_collect=True)
 log_config = dict(
     interval=100,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=False),
+        # dict(type='TensorboardLoggerHook'),
+        # dict(type='PaviLoggerHook', init_kwargs=dict(project='mmedit-sr'))
     ])
 visual_config = None
 
