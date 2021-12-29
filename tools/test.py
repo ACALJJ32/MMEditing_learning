@@ -99,7 +99,8 @@ def main():
             save_path=args.save_path,
             save_image=args.save_image)
     else:
-        find_unused_parameters = cfg.get('find_unused_parameters', False)
+        # find_unused_parameters = cfg.get('find_unused_parameters', False)
+        find_unused_parameters = True   # modify --ljj 1228 1017
         model = DistributedDataParallelWrapper(
             model,
             device_ids=[torch.cuda.current_device()],

@@ -18,11 +18,12 @@ from .basicvsr_gauss_attention import BasicVSRGaussModulation
 from .basicvsr_v2 import BasicVSRGaussModulationV2
 from .encoder_decoder_net import EncoderDecoderNet, Decoder
 from .edvr_net_v2 import EDVRV2Net
+from .edvr_net_v3 import EDVRV3Net
 
 __all__ = [
     'MSRResNet', 'RRDBNet', 'EDSR', 'EDVRNet', 'TOFlow', 'SRCNN', 'DICNet',
     'BasicVSRNet', 'IconVSR', 'RDN', 'TTSRNet', 'GLEANStyleGANv2', 'TDANNet',
     'LIIFEDSR', 'LIIFRDN', 'BasicVSRPlusPlus', 'PCDAlignment', 'TSAFusion',
     'BasicVSRGaussModulation', 'BasicVSRGaussModulationV2', "EncoderDecoderNet",
-    'EDVRV2Net', 'Decoder'
+    'EDVRV2Net', 'Decoder', 'EDVRV3Net'
 ]

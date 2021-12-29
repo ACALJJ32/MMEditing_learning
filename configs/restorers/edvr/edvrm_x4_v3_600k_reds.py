@@ -1,10 +1,10 @@
-exp_name = 'edvrm_v2_reds_focal_loss'
+exp_name = 'edvrm_v3_reds_focal_loss'
 
 # model settings
 model = dict(
-    type='EDVRV2',
+    type='EDVRV3',
     generator=dict(
-        type='EDVRV2Net',
+        type='EDVRV3Net',
         in_channels=3,
         out_channels=3,
         mid_channels=64,

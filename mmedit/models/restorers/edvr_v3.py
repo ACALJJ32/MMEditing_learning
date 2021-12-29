@@ -10,7 +10,7 @@ from .basic_restorer import BasicRestorer
 
 
 @MODELS.register_module()
-class EDVRV2(BasicRestorer):
+class EDVRV3(BasicRestorer):
     """EDVR model for video super-resolution.
 
     EDVR: Video Restoration with Enhanced Deformable Convolutional Networks.
@@ -84,26 +84,6 @@ class EDVRV2(BasicRestorer):
         out = self.generator(imgs)
         return out
 
-    def forward_train(self, lq, gt):
-        """Training forward function.
-
-        Args:
-            lq (Tensor): LQ Tensor with shape (n, c, h, w).
-            gt (Tensor): GT Tensor with shape (n, c, h, w).
-
-        Returns:
-            Tensor: Output tensor.
-        """
-        losses = dict()
-        output = self.generator(lq)
-        loss_pix = self.pixel_loss(output, gt)
-        losses['loss_pix'] = loss_pix
-        outputs = dict(
-            losses=losses,
-            num_samples=len(gt.data),
-            results=dict(lq=lq.cpu(), gt=gt.cpu(), output=[v.cpu() for v in output]))
-        return outputs
-
     def forward_test(self,
                      lq,
                      gt=None,
@@ -149,29 +129,6 @@ class EDVRV2(BasicRestorer):
             else:
                 raise ValueError('iteration should be number or None, '
                                  f'but got {type(iteration)}')
-            mmcv.imwrite(tensor2img(output[0]), save_path)
+            mmcv.imwrite(tensor2img(output), save_path)
 
         return results
-
-    def evaluate(self, output, gt):
-        """Evaluation function.
-
-        Args:
-            output (Tensor): Model output with shape (n, c, h, w).
-            gt (Tensor): GT Tensor with shape (n, c, h, w).
-
-        Returns:
-            dict: Evaluation results.
-        """
-        crop_border = self.test_cfg.crop_border
-
-        pred_hr, _, _ = output
-
-        output = tensor2img(pred_hr)
-        gt = tensor2img(gt)
-
-        eval_result = dict()
-        for metric in self.test_cfg.metrics:
-            eval_result[metric] = self.allowed_metrics[metric](output, gt,
-                                                               crop_border)
-        return eval_result
