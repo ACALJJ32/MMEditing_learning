@@ -14,7 +14,6 @@ from mmedit.models.common import (PixelShufflePack, ResidualBlockNoBN,
 from mmedit.models.registry import BACKBONES
 from mmedit.utils import get_root_logger
 from mmedit.models.common import DftFeatureExtractor
-from collections import OrderedDict
 
 
 class ModulatedDCNPack(ModulatedDeformConv2d):

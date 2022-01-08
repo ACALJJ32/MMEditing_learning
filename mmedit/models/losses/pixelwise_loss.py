@@ -213,11 +213,11 @@ class FocalFrequencyLoss(nn.Module):
             target_freq = torch.mean(target_freq, 0, keepdim=True)
         
         # improved --ljj
-        # b,_,c,h,w,_ = pred_freq.size()
-        # pred_freq[:,:,:,0,0,:] = 0; target_freq[:,:,:,0,0,:] = 0
-        # pred_freq[:,:,:,0,w-1,:] = 0; target_freq[:,:,:,0,w-1,:] = 0
-        # pred_freq[:,:,:,h-1,0,:] = 0; target_freq[:,:,:,h-1,0,:] = 0
-        # pred_freq[:,:,:,h-1,w-1,:] = 0; target_freq[:,:,:,h-1,w-1,:] = 0
+        b,_,c,h,w,_ = pred_freq.size()
+        pred_freq[:,:,:,0,0,:] = 0; target_freq[:,:,:,0,0,:] = 0
+        pred_freq[:,:,:,0,w-1,:] = 0; target_freq[:,:,:,0,w-1,:] = 0
+        pred_freq[:,:,:,h-1,0,:] = 0; target_freq[:,:,:,h-1,0,:] = 0
+        pred_freq[:,:,:,h-1,w-1,:] = 0; target_freq[:,:,:,h-1,w-1,:] = 0
         # end 
 
         # calculate focal frequency loss

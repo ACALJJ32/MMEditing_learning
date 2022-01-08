@@ -178,7 +178,7 @@ class DftFeatureExtractor(nn.Module):
 
         x_proj = torch.matmul(gauss_b, x_proj)
 
-        feat = torch.cat((torch.sin(x_proj), torch.cos(x_proj), feat), dim=1)  # [b, 2 * mid_channels, h, w]
+        feat = torch.cat((torch.sin(x_proj), torch.cos(x_proj), feat), dim=1)  # [b, 3 * mid_channels, h, w]
         feat = self.conv_middle(feat)
 
         return feat
