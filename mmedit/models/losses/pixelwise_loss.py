@@ -410,9 +410,6 @@ class MultiStreamLoss(nn.Module):
         self.reduction = reduction
         self.sample_wise = sample_wise
         self.eps = eps
-
-        # FocalFrequencyLoss
-        self.focal_frequency_loss = FocalFrequencyLoss()
     
     def forward(self, pred, target, weight=None, **kwargs):
         """Forward Function.
@@ -440,6 +437,6 @@ class MultiStreamLoss(nn.Module):
         #     reduction=self.reduction,
         #     sample_wise=self.sample_wise)
         
-        facol_loss = self.focal_frequency_loss(pred, target)
+        facol_loss = focal_loss(pred, target)
 
         return loss_stream1 + 0.5 * facol_loss

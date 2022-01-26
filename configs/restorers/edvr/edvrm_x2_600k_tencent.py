@@ -1,10 +1,10 @@
-exp_name = 'edvrm_x4_g8_600k_reds_test'
+exp_name = 'edvrm_x2_600k_tencent'
 
 # model settings
 model = dict(
     type='EDVR',
     generator=dict(
-        type='EDVRV2Net',
+        type='EDVRNet_X2',
         in_channels=3,
         out_channels=3,
         mid_channels=64,
@@ -20,8 +20,8 @@ train_cfg = dict(tsa_iter=50000)
 test_cfg = dict(metrics=['PSNR'], crop_border=0)
 
 # dataset settings
-train_dataset_type = 'SRREDSDataset'
-val_dataset_type = 'SRREDSDataset'
+train_dataset_type = 'SRTencentDataset'
+val_dataset_type = 'SRTencentDataset'
 train_pipeline = [
     dict(type='GenerateFrameIndices', interval_list=[1], frames_per_clip=99),
     dict(type='TemporalReverse', keys='lq_path', reverse_ratio=0),
@@ -64,7 +64,6 @@ test_pipeline = [
         io_backend='disk',
         key='gt',
         flag='unchanged'),
-    # dict(type='HomographyWithSIFT', keys=['lq', 'gt'], ratio = 0.25),
     dict(type='RescaleToZeroOne', keys=['lq', 'gt']),
     dict(
         type='Normalize',
@@ -101,32 +100,32 @@ data = dict(
         times=1000,
         dataset=dict(
             type=train_dataset_type,
-            lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
-            gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
-            ann_file='/media/test/Disk2/DATA/VSR/REDS/train/meta_info_REDS_GT.txt',
+            lq_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_540p_train_frames',
+            gt_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_2K_train_frames',
+            ann_file='/media/test/Disk4/DATA/Tencent_SDR/train/meta_info_Tencent_GT_X2.txt',
             num_input_frames=5,
             pipeline=train_pipeline,
-            scale=4,
+            scale=2,
             val_partition='REDS4',
             test_mode=False)),
     val=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
-        gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
-        ann_file='/media/test/Disk2/DATA/VSR/REDS/train/meta_info_REDS_GT.txt',
+        lq_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_540p_train_frames',
+        gt_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_2K_train_frames',
+        ann_file='/media/test/Disk4/DATA/Tencent_SDR/train/meta_info_Tencent_GT_X2.txt',
         num_input_frames=5,
         pipeline=test_pipeline,
-        scale=4,
+        scale=2,
         val_partition='REDS4',
         test_mode=True),
     test=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp_bicubic/X4',
-        gt_folder='/media/test/Disk2/DATA/VSR/REDS/train/train_sharp',
-        ann_file='/media/test/Disk2/DATA/VSR/REDS/train/meta_info_REDS_GT.txt',
+        lq_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_540p_train_frames',
+        gt_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_2K_train_frames',
+        ann_file='/media/test/Disk4/DATA/Tencent_SDR/train/meta_info_Tencent_GT_X2.txt',
         num_input_frames=5,
         pipeline=test_pipeline,
-        scale=4,
+        scale=2,
         val_partition='REDS4',
         test_mode=True),
 )
@@ -150,8 +149,6 @@ log_config = dict(
     interval=100,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=False),
-        # dict(type='TensorboardLoggerHook'),
-        # dict(type='PaviLoggerHook', init_kwargs=dict(project='mmedit-sr'))
     ])
 visual_config = None
 

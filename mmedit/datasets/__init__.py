@@ -25,6 +25,8 @@ from .sr_vid4_dataset import SRVid4Dataset
 from .sr_vimeo90k_dataset import SRVimeo90KDataset
 from .sr_vimeo90k_multiple_gt_dataset import SRVimeo90KMultipleGTDataset
 from .sr_anime_dataset import SRAnimeDataset
+from .sr_tencent_x2_dataset import SRTencentDataset
+from .sr_tencenet_X2_multiple_gt_dataset import SRTencentMultipleGTDataset
 
 __all__ = [
     'DATASETS', 'PIPELINES', 'build_dataset', 'build_dataloader',
@@ -35,5 +37,6 @@ __all__ = [
     'GenerationUnpairedDataset', 'SRVid4Dataset', 'SRFolderGTDataset',
     'SRREDSMultipleGTDataset', 'SRVimeo90KMultipleGTDataset',
     'SRTestMultipleGTDataset', 'SRFolderRefDataset', 'SRFacialLandmarkDataset',
-    'SRFolderMultipleGTDataset', 'SRFolderVideoDataset', 'SRAnimeDataset'
+    'SRFolderMultipleGTDataset', 'SRFolderVideoDataset', 'SRAnimeDataset', 'SRTencentDataset',
+    'SRTencentMultipleGTDataset'
 ]
