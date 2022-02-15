@@ -1,4 +1,4 @@
-exp_name = 'iconvsr_reds2_tencenet'
+exp_name = 'iconvsr_reds2_youku'
 
 # model settings
 model = dict(
@@ -19,8 +19,8 @@ train_cfg = dict(fix_iter=5000)
 test_cfg = dict(metrics=['PSNR', 'SSIM'], crop_border=0)
 
 # dataset settings
-train_dataset_type = 'SRTencentMultipleGTDataset'
-val_dataset_type = 'SRTencentMultipleGTDataset'
+train_dataset_type = 'SRyoukuMultipleGTDataset'
+val_dataset_type = 'SRyoukuMultipleGTDataset'
 train_pipeline = [
     dict(type='GenerateSegmentIndices', interval_list=[1]),
     dict(type='TemporalReverse', keys='lq_path', reverse_ratio=0),
@@ -89,8 +89,8 @@ data = dict(
         times=1000,
         dataset=dict(
             type=train_dataset_type,
-            lq_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_540p_train_frames',
-            gt_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_2K_train_frames',
+            lq_folder='/media/test/Disk4/DATA/Youku/LR',
+            gt_folder='/media/test/Disk4/DATA/Youku/SDR_2K_train_frames',
             num_input_frames=10,
             pipeline=train_pipeline,
             scale=2,
@@ -99,8 +99,8 @@ data = dict(
     # val
     val=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_540p_train_frames',
-        gt_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_2K_train_frames',
+        lq_folder='/media/test/Disk4/DATA/Youku/LR',
+        gt_folder='/media/test/Disk4/DATA/Youku/SDR_2K_train_frames',
         num_input_frames=10,
         pipeline=test_pipeline,
         scale=2,
@@ -108,8 +108,8 @@ data = dict(
         test_mode=True),
     test=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_540p_train_frames',
-        gt_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_2K_train_frames',
+        lq_folder='/media/test/Disk4/DATA/Youku/LR',
+        gt_folder='/media/test/Disk4/DATA/Youku/SDR_2K_train_frames',
         num_input_frames=10,
         pipeline=test_pipeline,
         scale=2,

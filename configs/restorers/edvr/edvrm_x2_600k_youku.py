@@ -1,68 +1,81 @@
-exp_name = 'iconvsr_reds2_tencenet'
+exp_name = 'edvrm_x2_600k_youku'
 
 # model settings
 model = dict(
-    type='BasicVSR',
+    type='EDVR',
     generator=dict(
-        type='IconVSR_X2',
+        type='EDVRNet_X2',
+        in_channels=3,
+        out_channels=3,
         mid_channels=64,
-        num_blocks=30,
-        keyframe_stride=5,
-        padding=2,
-        spynet_pretrained='https://download.openmmlab.com/mmediting/restorers/'
-        'basicvsr/spynet_20210409-c6c1bd09.pth',
-        edvr_pretrained='https://download.openmmlab.com/mmediting/restorers/'
-        'iconvsr/edvrm_reds_20210413-3867262f.pth'),
-    pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='mean'))
+        num_frames=5,
+        deform_groups=8,
+        num_blocks_extraction=5,
+        num_blocks_reconstruction=10,
+        center_frame_idx=2,
+        with_tsa=True),
+    pixel_loss=dict(type='CharbonnierLoss', loss_weight=1.0, reduction='sum'))
 # model training and testing settings
-train_cfg = dict(fix_iter=5000)
-test_cfg = dict(metrics=['PSNR', 'SSIM'], crop_border=0)
+train_cfg = dict(tsa_iter=50000)
+test_cfg = dict(metrics=['PSNR'], crop_border=0)
 
 # dataset settings
-train_dataset_type = 'SRTencentMultipleGTDataset'
-val_dataset_type = 'SRTencentMultipleGTDataset'
+train_dataset_type = 'SRyoukuDataset'
+val_dataset_type = 'SRyoukuDataset'
 train_pipeline = [
-    dict(type='GenerateSegmentIndices', interval_list=[1]),
+    dict(type='GenerateFrameIndices', interval_list=[1], frames_per_clip=99),
     dict(type='TemporalReverse', keys='lq_path', reverse_ratio=0),
     dict(
         type='LoadImageFromFileList',
         io_backend='disk',
         key='lq',
-        channel_order='rgb'),
+        flag='unchanged'),
     dict(
         type='LoadImageFromFileList',
         io_backend='disk',
         key='gt',
-        channel_order='rgb'),
+        flag='unchanged'),
     dict(type='RescaleToZeroOne', keys=['lq', 'gt']),
+    dict(
+        type='Normalize',
+        keys=['lq', 'gt'],
+        mean=[0, 0, 0],
+        std=[1, 1, 1],
+        to_rgb=True),
     dict(type='PairedRandomCrop', gt_patch_size=256),
     dict(
         type='Flip', keys=['lq', 'gt'], flip_ratio=0.5,
         direction='horizontal'),
     dict(type='Flip', keys=['lq', 'gt'], flip_ratio=0.5, direction='vertical'),
     dict(type='RandomTransposeHW', keys=['lq', 'gt'], transpose_ratio=0.5),
-    dict(type='FramesToTensor', keys=['lq', 'gt']),
-    dict(type='Collect', keys=['lq', 'gt'], meta_keys=['lq_path', 'gt_path'])
+    dict(type='Collect', keys=['lq', 'gt'], meta_keys=['lq_path', 'gt_path']),
+    dict(type='FramesToTensor', keys=['lq', 'gt'])
 ]
 
 test_pipeline = [
-    dict(type='GenerateSegmentIndicesFixStart', interval_list=[1]),  #   GenerateSegmentIndices  GenerateSegmentIndicesFixStart
+    dict(type='GenerateFrameIndiceswithPadding', padding='reflection_circle'),
     dict(
         type='LoadImageFromFileList',
         io_backend='disk',
         key='lq',
-        channel_order='rgb'),
+        flag='unchanged'),
     dict(
         type='LoadImageFromFileList',
         io_backend='disk',
         key='gt',
-        channel_order='rgb'),
+        flag='unchanged'),
     dict(type='RescaleToZeroOne', keys=['lq', 'gt']),
-    dict(type='FramesToTensor', keys=['lq', 'gt']),
+    dict(
+        type='Normalize',
+        keys=['lq', 'gt'],
+        mean=[0, 0, 0],
+        std=[1, 1, 1],
+        to_rgb=True),
     dict(
         type='Collect',
         keys=['lq', 'gt'],
-        meta_keys=['lq_path', 'gt_path', 'key'])
+        meta_keys=['lq_path', 'gt_path', 'key']),
+    dict(type='FramesToTensor', keys=['lq', 'gt'])
 ]
 
 demo_pipeline = [
@@ -78,39 +91,39 @@ demo_pipeline = [
 ]
 
 data = dict(
-    workers_per_gpu=6,
-    train_dataloader=dict(samples_per_gpu=2, drop_last=True),
+    workers_per_gpu=4,
+    train_dataloader=dict(samples_per_gpu=4, drop_last=True),
     val_dataloader=dict(samples_per_gpu=1),
-    test_dataloader=dict(samples_per_gpu=1, workers_per_gpu=1),
-
-    # train
+    test_dataloader=dict(samples_per_gpu=1),
     train=dict(
         type='RepeatDataset',
         times=1000,
         dataset=dict(
             type=train_dataset_type,
-            lq_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_540p_train_frames',
-            gt_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_2K_train_frames',
-            num_input_frames=10,
+            lq_folder='/media/test/Disk4/DATA/Youku/LR',
+            gt_folder='/media/test/Disk4/DATA/Youku/SDR_2K_train_frames',
+            ann_file='/media/test/Disk4/DATA/Tencent_SDR/train/meta_info_Tencent_GT_X2.txt',
+            num_input_frames=5,
             pipeline=train_pipeline,
             scale=2,
             val_partition='REDS4',
             test_mode=False)),
-    # val
     val=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_540p_train_frames',
-        gt_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_2K_train_frames',
-        num_input_frames=10,
+        lq_folder='/media/test/Disk4/DATA/Youku/LR',
+        gt_folder='/media/test/Disk4/DATA/Youku/SDR_2K_train_frames',
+        ann_file='/media/test/Disk4/DATA/Tencent_SDR/train/meta_info_Tencent_GT_X2.txt',
+        num_input_frames=5,
         pipeline=test_pipeline,
         scale=2,
         val_partition='REDS4',
         test_mode=True),
     test=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_540p_train_frames',
-        gt_folder='/media/test/Disk4/DATA/Tencent_SDR/train/SDR_2K_train_frames',
-        num_input_frames=10,
+        lq_folder='/media/test/Disk4/DATA/Youku/LR',
+        gt_folder='/media/test/Disk4/DATA/Youku/SDR_2K_train_frames',
+        ann_file='/media/test/Disk4/DATA/Tencent_SDR/train/meta_info_Tencent_GT_X2.txt',
+        num_input_frames=5,
         pipeline=test_pipeline,
         scale=2,
         val_partition='REDS4',
@@ -118,20 +131,15 @@ data = dict(
 )
 
 # optimizer
-optimizers = dict(
-    generator=dict(
-        type='Adam',
-        lr=2e-4,
-        betas=(0.9, 0.99),
-        paramwise_cfg=dict(custom_keys={'spynet': dict(lr_mult=0.125)})))
+optimizers = dict(generator=dict(type='Adam', lr=2e-4, betas=(0.9, 0.999)))
 
 # learning policy
-total_iters = 300000
+total_iters = 600000
 lr_config = dict(
     policy='CosineRestart',
     by_epoch=False,
-    periods=[300000],
-    restart_weights=[1],
+    periods=[50000, 100000, 150000, 150000, 150000],
+    restart_weights=[1, 1, 1, 1, 1],
     min_lr=1e-7)
 
 checkpoint_config = dict(interval=5000, save_optimizer=True, by_epoch=False)
@@ -141,7 +149,6 @@ log_config = dict(
     interval=100,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=False),
-        # dict(type='TensorboardLoggerHook'),
     ])
 visual_config = None
 
@@ -149,7 +156,6 @@ visual_config = None
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 work_dir = f'./work_dirs/{exp_name}'
-load_from = None
+load_from = 'weight/edvr/edvrm_wotsa_x4_8x4_600k_reds_20200522-0570e567.pth'
 resume_from = None
 workflow = [('train', 1)]
-find_unused_parameters = True

@@ -13,7 +13,7 @@ from mmedit.utils import get_root_logger
 
 
 @BACKBONES.register_module()
-class GLEANStyleGANv2(nn.Module):
+class GLEANStereo(nn.Module):
     r"""GLEAN (using StyleGANv2) architecture for super-resolution.
 
     Paper:
@@ -205,7 +205,7 @@ class GLEANStyleGANv2(nn.Module):
         Returns:
             Tensor: Padded LR sequence with shape (n, t, c, h_pad, w_pad).
         """
-        n, t, c, h, w = lrs.size()
+        n, c, h, w = lrs.size()
 
         pad_h = (4 - h % 4) % 4
         pad_w = (4 - w % 4) % 4
@@ -214,7 +214,7 @@ class GLEANStyleGANv2(nn.Module):
         lrs = lrs.view(-1, c, h, w)
         lrs = F.pad(lrs, [0, pad_w, 0, pad_h], mode='reflect')
 
-        return lrs.view(n, t, c, h + pad_h, w + pad_w)
+        return lrs.view(n, c, h + pad_h, w + pad_w)
 
     def forward(self, lq):
         """Forward function.
@@ -227,10 +227,14 @@ class GLEANStyleGANv2(nn.Module):
         """
 
         h, w = lq.shape[2:]
-        if h != self.in_size or w != self.in_size:
-            raise AssertionError(
-                f'Spatial resolution must equal in_size ({self.in_size}).'
-                f' Got ({h}, {w}).')
+        h_input, w_input = lq.shape[2:]
+        
+        # if h != self.in_size or w != self.in_size:
+        #     raise AssertionError(
+        #         f'Spatial resolution must equal in_size ({self.in_size}).'
+        #         f' Got ({h}, {w}).')
+        
+        lq = self.spatial_padding(lq)
 
         # encoder
         feat = lq
@@ -290,7 +294,8 @@ class GLEANStyleGANv2(nn.Module):
             if i > 0:
                 hr = torch.cat([hr, generator_features[i - 1]], dim=1)
             hr = block(hr)
-        return hr
+
+        return hr[:, :, :4 * h_input, :4 * w_input]
 
     def init_weights(self, pretrained=None, strict=True):
         """Init weights for models.

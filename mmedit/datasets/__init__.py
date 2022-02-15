@@ -10,7 +10,7 @@ from .generation_paired_dataset import GenerationPairedDataset
 from .generation_unpaired_dataset import GenerationUnpairedDataset
 from .img_inpainting_dataset import ImgInpaintingDataset
 from .registry import DATASETS, PIPELINES
-from .sr_annotation_dataset import SRAnnotationDataset
+from .sr_annotation_dataset import SRAnnotationDataset, SRAnnotationStereoDataset
 from .sr_facial_landmark_dataset import SRFacialLandmarkDataset
 from .sr_folder_dataset import SRFolderDataset
 from .sr_folder_gt_dataset import SRFolderGTDataset
@@ -27,6 +27,8 @@ from .sr_vimeo90k_multiple_gt_dataset import SRVimeo90KMultipleGTDataset
 from .sr_anime_dataset import SRAnimeDataset
 from .sr_tencent_x2_dataset import SRTencentDataset
 from .sr_tencenet_X2_multiple_gt_dataset import SRTencentMultipleGTDataset
+from .sr_youku_X2_multiple_gt_dataset import SRyoukuMultipleGTDataset
+from .sr_youku_x2_dataset import SRyoukuDataset
 
 __all__ = [
     'DATASETS', 'PIPELINES', 'build_dataset', 'build_dataloader',
@@ -38,5 +40,5 @@ __all__ = [
     'SRREDSMultipleGTDataset', 'SRVimeo90KMultipleGTDataset',
     'SRTestMultipleGTDataset', 'SRFolderRefDataset', 'SRFacialLandmarkDataset',
     'SRFolderMultipleGTDataset', 'SRFolderVideoDataset', 'SRAnimeDataset', 'SRTencentDataset',
-    'SRTencentMultipleGTDataset'
+    'SRTencentMultipleGTDataset','SRyoukuMultipleGTDataset','SRyoukuDataset', 'SRAnnotationStereoDataset'
 ]

@@ -1,12 +1,12 @@
-exp_name = 'glean_cat_8x'
+exp_name = 'glean_4x'
 
-scale = 8
+scale = 4
 # model settings
 model = dict(
     type='GLEAN',
     generator=dict(
-        type='GLEANStyleGANv2',
-        in_size=32,
+        type='GLEANStereo',
+        in_size=64,
         out_size=256,
         style_channels=512,
         pretrained=dict(
@@ -46,8 +46,8 @@ train_cfg = None
 test_cfg = dict(metrics=['PSNR'], crop_border=0)
 
 # dataset settings
-train_dataset_type = 'SRAnnotationDataset'
-val_dataset_type = 'SRAnnotationDataset'
+train_dataset_type = 'SRAnnotationStereoDataset'
+val_dataset_type = 'SRAnnotationStereoDataset'
 train_pipeline = [
     dict(type='LoadImageFromFile', io_backend='disk', key='lq'),
     dict(type='LoadImageFromFile', io_backend='disk', key='gt'),
@@ -64,6 +64,7 @@ train_pipeline = [
     dict(type='ImageToTensor', keys=['lq', 'gt']),
     dict(type='Collect', keys=['lq', 'gt'], meta_keys=['lq_path', 'gt_path'])
 ]
+
 test_pipeline = [
     dict(type='LoadImageFromFile', io_backend='disk', key='lq'),
     dict(type='LoadImageFromFile', io_backend='disk', key='gt'),
@@ -88,23 +89,23 @@ data = dict(
         times=1000,
         dataset=dict(
             type=train_dataset_type,
-            lq_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ntire2022/Stereo Image Super-Resolution Challenge/Train/LR_x4',
-            gt_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ntire2022/Stereo Image Super-Resolution Challenge/Train/HR',
-            ann_file='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ntire2022/Stereo Image Super-Resolution Challenge/Train/meta_info_Stereo_GT.txt',
+            lq_folder='/data/ntire2022/Stereo Image Super-Resolution Challenge/Train/patches_v2_x4',
+            gt_folder='/data/ntire2022/Stereo Image Super-Resolution Challenge/Train/patches_v2_x4',
+            ann_file='/data/ntire2022/Stereo Image Super-Resolution Challenge/Train/meta_info_Stereo_GT2.txt',
             pipeline=train_pipeline,
             scale=scale)),
     val=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ntire2022/Stereo Image Super-Resolution Challenge/Validation/LR_x4',
-        gt_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ntire2022/Stereo Image Super-Resolution Challenge/Validation/HR',
-        ann_file='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ntire2022/Stereo Image Super-Resolution Challenge/Validation/meta_info_Stereo_Val_GT.txt',
+        lq_folder='/data/ntire2022/Stereo Image Super-Resolution Challenge/Validation/patches_v2_x4',
+        gt_folder='/data/ntire2022/Stereo Image Super-Resolution Challenge/Validation/patches_v2_x4',
+        ann_file='/data/ntire2022/Stereo Image Super-Resolution Challenge/Validation/meta_info_Stereo_GT_validation.txt',
         pipeline=test_pipeline,
         scale=scale),
     test=dict(
         type=val_dataset_type,
-        lq_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ntire2022/Stereo Image Super-Resolution Challenge/Validation/LR_x4',
-        gt_folder='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ntire2022/Stereo Image Super-Resolution Challenge/Validation/HR',
-        ann_file='/media/test/8026ac84-a5ee-466b-affa-f8c81a423d9b/ntire2022/Stereo Image Super-Resolution Challenge/Validation/meta_info_Stereo_Val_GT.txt',
+        lq_folder='/data/ntire2022/Stereo Image Super-Resolution Challenge/Validation/patches_v2_x4',
+        gt_folder='/data/ntire2022/Stereo Image Super-Resolution Challenge/Validation/patches_v2_x4',
+        ann_file='/data/ntire2022/Stereo Image Super-Resolution Challenge/Validation/meta_info_Stereo_GT_validation.txt',
         pipeline=test_pipeline,
         scale=scale))
 
@@ -125,7 +126,7 @@ lr_config = dict(
 checkpoint_config = dict(interval=5000, save_optimizer=True, by_epoch=False)
 evaluation = dict(interval=5000, save_image=False, gpu_collect=True)
 log_config = dict(
-    interval=100,
+    interval=50,
     hooks=[
         dict(type='TextLoggerHook', by_epoch=False),
         # dict(type='TensorboardLoggerHook'),

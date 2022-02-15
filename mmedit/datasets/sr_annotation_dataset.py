@@ -73,3 +73,48 @@ class SRAnnotationDataset(BaseSRDataset):
                         lq_path=osp.join(self.lq_folder, lq_name),
                         gt_path=osp.join(self.gt_folder, gt_name)))
         return data_infos
+
+
+@DATASETS.register_module()
+class SRAnnotationStereoDataset(BaseSRDataset):
+    def __init__(self,
+                 lq_folder,
+                 gt_folder,
+                 ann_file,
+                 pipeline,
+                 scale,
+                 test_mode=False,
+                 filename_tmpl='{}'):
+        super().__init__(pipeline, scale, test_mode)
+        self.lq_folder = str(lq_folder)
+        self.gt_folder = str(gt_folder)
+        self.ann_file = str(ann_file)
+        self.filename_tmpl = filename_tmpl
+        self.data_infos = self.load_annotations()
+
+    def load_annotations(self):
+        """Load annoations for SR dataset.
+
+        It loads the LQ and GT image path from the annotation file.
+        Each line in the annotation file contains the image names and
+        image shape (usually for gt), separated by a white space.
+
+        Returns:
+            dict: Returned dict for LQ and GT pairs.
+        """
+        data_infos = []
+        with open(self.ann_file, 'r') as fin:
+            for line in fin:
+                gt_name = line.split(' ')[0]
+                base_clip, basename = gt_name.split("/")
+                if basename.split(".")[0] == 'hr0':
+                    lq_name = base_clip + '/' + 'lr0.png'
+                
+                if basename.split(".")[0] == 'hr1':
+                    lq_name = base_clip + '/' + 'lr1.png'
+                
+                data_infos.append(
+                    dict(
+                        lq_path=osp.join(self.lq_folder, lq_name),
+                        gt_path=osp.join(self.gt_folder, gt_name)))
+        return data_infos
